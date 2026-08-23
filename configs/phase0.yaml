@@ -1,0 +1,140 @@
+# =============================================================================
+# Open Player - Phase 0 frozen configuration
+#
+# Every hyperparameter used by Phase 0 lives here.  Nothing in the code base
+# hard-codes a hyperparameter value: modules read their configuration from
+# this file (or from an equivalent dict).
+# =============================================================================
+
+meta:
+  name: open-player-phase0
+  version: 1
+  description: >-
+    Phase 0 minimal Learning Agent Core: Observation -> WorldState ->
+    WorldModel -> Prediction -> Loss -> Backprop, plus Events / Episodes /
+    Goals / Planner / Skills / Actions on a synthetic grid world.
+
+seed: 0
+device: auto            # auto | cpu | cuda | cuda:0 ...
+
+logging:
+  level: INFO
+
+# -----------------------------------------------------------------------------
+# Core schema: tensor layouts.  D_entity is DERIVED from entity_fields
+# (never hard-coded); the Phase 0 default happens to sum to 42.
+# -----------------------------------------------------------------------------
+schema:
+  max_entities: 32
+  world_size: 12        # used to normalise positions
+  max_speed: 1.0
+  max_size: 3.0
+  entity_fields:
+    - { name: position,            dim: 2 }
+    - { name: velocity,            dim: 2 }
+    - { name: size,                dim: 1 }
+    - { name: appearance,          dim: 8 }
+    - { name: semantic_features,   dim: 16 }
+    - { name: dynamics_features,   dim: 12 }
+    - { name: status,              dim: 1 }
+  belief_dim: 8
+  relation_fields:
+    - { name: distance,            dim: 1 }
+    - { name: direction,           dim: 2 }
+    - { name: relative_velocity,   dim: 2 }
+    - { name: overlap,             dim: 1 }
+    - { name: visibility,          dim: 1 }
+    - { name: semantic_relation,   dim: 1 }
+  spatial:
+    channels: 16
+    height: 32
+    width: 32
+  dynamics_dim: 64
+  temporal_dim: 16
+  global_dim: 32
+  uncertainty_dim: 8
+
+# -----------------------------------------------------------------------------
+# Synthetic environment (Phase 0 toy world)
+# -----------------------------------------------------------------------------
+environment:
+  grid_size: 12
+  num_enemies: 2
+  num_resources: 4
+  fog_radius: 5
+  max_steps: 120
+  player_hp: 3
+  enemy_move_prob: 0.8
+  enemy_attack_prob: 0.5
+  reward:
+    collect: 1.0
+    explore: 0.02
+    step: -0.01
+    death: -1.0
+
+# -----------------------------------------------------------------------------
+# World model (representation + dynamics + predictor heads)
+# -----------------------------------------------------------------------------
+world_model:
+  entity_hidden: 128
+  spatial_channels: [32, 64]
+  spatial_embed: 256
+  relation_hidden: 32
+  latent_dim: 64
+  dynamics_hidden: 128
+  head_hidden: 256
+  action_embedding_dim: 32
+  loss_weights:
+    entity: 1.0
+    spatial: 0.1
+    change: 0.5
+    latent: 0.1
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  replay_capacity: 2048
+  update_every: 1          # online world-model update every N env steps
+  replay_update_every: 8   # replay batch updates every N env steps
+  replay_updates_per_tick: 1
+  exploration_eps: 0.15
+  epsilon_decay: 0.999
+  grad_clip: 1.0
+  steps: 2000              # default total env steps for phase0_train.py
+  log_every: 100
+  goal_min_exploration: 0.6
+
+planning:
+  horizons:
+    short: 4
+    medium: 8
+    long: 32
+  rollout_steps: 4
+  max_candidates: 4
+  goal_type_horizons:
+    task: short
+    survival: short
+    skill_improvement: short
+    exploration: medium
+    information: long
+    learning: long
+
+goals:
+  novelty_threshold: 0.2
+  threat_threshold: 0.5
+  learning_threshold: 0.05
+  type_weights:
+    task: 1.0
+    survival: 0.9
+    exploration: 0.5
+    information: 0.3
+    learning: 0.3
+    skill_improvement: 0.2
+
+memory:
+  working_capacity: 64
+  episodic_capacity: 100
+
+checkpoint:
+  dir: checkpoints
+  keep_last: 2
