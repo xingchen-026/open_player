@@ -19,6 +19,7 @@ class SyntheticGridEnv(Environment):
         self.config = config
         self._action_space = DiscreteActionSpace(list(DEFAULT_ACTION_NAMES))
         self.max_steps = int(ec.max_steps)
+        self.render_rgb = bool(ec.get("render_rgb", False))
         self._world = GridWorld(
             grid_size=int(ec.grid_size),
             num_enemies=int(ec.num_enemies),
@@ -27,6 +28,8 @@ class SyntheticGridEnv(Environment):
             player_hp=int(ec.player_hp),
             enemy_move_prob=float(ec.enemy_move_prob),
             enemy_attack_prob=float(ec.get("enemy_attack_prob", 0.5)),
+            wall_density=ec.get("wall_density", None),
+            resource_cluster=bool(ec.get("resource_cluster", False)),
             seed=int(config.seed),
         )
         self._reward_cfg = ec.reward
@@ -36,7 +39,7 @@ class SyntheticGridEnv(Environment):
     def reset(self, seed: Optional[int] = None) -> Observation:
         self._world.reset(seed=seed)
         self._t = 0
-        return self._world.build_observation(t=0)
+        return self._attach_rgb(self._world.build_observation(t=0))
 
     def step(self, action: Action | int) -> Tuple[Observation, float, bool, Dict[str, Any]]:
         name = self._resolve_action(action)
@@ -46,7 +49,7 @@ class SyntheticGridEnv(Environment):
         done = bool(done) or timed_out
         info["env_t"] = self._t
         info["timeout"] = timed_out
-        obs = self._world.build_observation(t=self._t)
+        obs = self._attach_rgb(self._world.build_observation(t=self._t))
         return obs, reward, done, info
 
     # -- helpers ---------------------------------------------------------- #
@@ -56,6 +59,13 @@ class SyntheticGridEnv(Environment):
         else:
             idx = int(action)
         return self.action_space.name(idx)
+
+    def _attach_rgb(self, obs: Observation) -> Observation:
+        """Attach an RGB frame (160x90) when render_rgb is enabled."""
+        if self.render_rgb:
+            from open_player.environments.synthetic.renderer import rgb_from_observation
+            obs.extra["rgb"] = rgb_from_observation(obs)
+        return obs
 
     def render_ascii(self) -> str:
         from open_player.environments.synthetic.renderer import AsciiRenderer

@@ -124,3 +124,53 @@ class HeuristicEventDetector(ChangeDetector):
             confidence=float(conf),
             metadata=dict(meta),
         )
+
+
+class HybridEventDetector(ChangeDetector):
+    """Heuristic events + learned change/boundary signal (Phase 1).
+
+    The heuristic detector is untouched; the learned predictor (z_t, action,
+    z_t1 -> change prob / boundary prob) is blended into every event's
+    confidence and stored in the event metadata.
+    """
+
+    def __init__(
+        self,
+        heuristic: HeuristicEventDetector,
+        world_model: Optional[Any] = None,
+        conf_blend: float = 0.5,
+        device: Any = "cpu",
+    ) -> None:
+        self.heuristic = heuristic
+        self.world_model = world_model
+        self.conf_blend = float(conf_blend)
+        self.device = device
+
+    @property
+    def predictor_available(self) -> bool:
+        return self.world_model is not None and getattr(self.world_model, "change_predictor", None) is not None
+
+    def detect(self, prev: Optional[WorldState], curr: WorldState, env_info: Dict[str, Any], t: int) -> List[Event]:
+        events = self.heuristic.detect(prev, curr, env_info, t)
+        if not events or not self.predictor_available or prev is None:
+            return events
+        try:
+            import torch
+            action = int(env_info.get("action", 0))
+            with torch.no_grad():
+                z_t = self.world_model.representation(prev).z
+                z_t1 = self.world_model.representation(curr).z
+                a = torch.full((z_t.shape[0],), action, dtype=torch.long, device=self.device)
+                logits, boundary = self.world_model.change_predictor(z_t, a, z_t1)
+                prob = float(torch.sigmoid(logits[:, 1]).mean())
+                bprob = float(boundary.mean())
+        except Exception:  # pragma: no cover - defensive
+            return events
+        for e in events:
+            e.confidence = float(self.conf_blend * prob + (1.0 - self.conf_blend) * e.confidence)
+            e.metadata["learned_change_prob"] = prob
+            e.metadata["boundary_prob"] = bprob
+        return events
+
+    def boundary_score(self, event: Event) -> float:
+        return float(event.metadata.get("boundary_prob", 0.0))

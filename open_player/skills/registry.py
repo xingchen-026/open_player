@@ -41,11 +41,20 @@ class SkillRegistry:
         return len(self._skills)
 
     @classmethod
-    def build_default(cls, controller: ActionController, config: Any) -> "SkillRegistry":
-        """The Phase 0 default skill set (short/medium/long horizons)."""
+    def build_default(
+        cls,
+        controller: ActionController,
+        config: Any,
+        intrinsic: Optional[Any] = None,
+        visit_counter: Optional[Any] = None,
+    ) -> "SkillRegistry":
+        """The default skill set (Phase 0 rules + Phase 1 intrinsic wiring)."""
         horizons = config.get("planning.horizons", {"short": 4, "medium": 8, "long": 32})
         reg = cls()
-        reg.register(ExploreSkill(controller, horizon=int(horizons["medium"]), name="explore"))
+        reg.register(ExploreSkill(
+            controller, horizon=int(horizons["medium"]), name="explore",
+            intrinsic=intrinsic, visit_counter=visit_counter,
+        ))
         reg.register(ApproachSkill(controller, target_type="resource", horizon=int(horizons["short"]), name="approach_resource"))
         reg.register(CollectSkill(controller, horizon=int(horizons["short"]), name="collect"))
         reg.register(AvoidThreatSkill(controller, horizon=int(horizons["short"]), name="avoid_threat"))

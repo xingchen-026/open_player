@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from open_player.core.config import default_config, set_seed
+from open_player.core.config import default_config, phase1_config, set_seed
 from open_player.core.schema import SchemaSet
 from open_player.environments.synthetic.env import SyntheticGridEnv
 from open_player.tracking.tracker import BeliefTracker
@@ -30,6 +30,34 @@ def make_small_config(**overrides: object) -> object:
             "steps": 200,
             "log_every": 1000,
         },
+    })
+    if overrides:
+        cfg = cfg.merge(overrides)
+    return cfg
+
+
+def make_small_phase1_config(**overrides: object) -> object:
+    """Phase 1 config sized for fast CPU tests."""
+    cfg = phase1_config().merge({
+        "device": "cpu",
+        "seed": 7,
+        "environment": {
+            "grid_size": 10,
+            "num_enemies": 1,
+            "num_resources": 2,
+            "fog_radius": 8,
+            "max_steps": 40,
+            "player_hp": 6,
+            "render_rgb": True,
+        },
+        "training": {
+            "batch_size": 16,
+            "replay_capacity": 256,
+            "replay_update_every": 1000,
+            "steps": 150,
+            "log_every": 1000,
+        },
+        "multi_step": {"horizons": [4, 8], "loss_weights": {"step1": 1.0, "step4": 0.5, "step8": 0.25}, "window": 8},
     })
     if overrides:
         cfg = cfg.merge(overrides)
@@ -73,3 +101,23 @@ def model(cfg, schema):
     set_seed(0)
     m = WorldModel(schema, cfg, num_actions=6)
     return m
+
+
+# ---------------- Phase 1 fixtures ---------------- #
+
+@pytest.fixture(scope="session")
+def cfg_p1():
+    return make_small_phase1_config()
+
+
+@pytest.fixture(scope="session")
+def schema_p1(cfg_p1):
+    return SchemaSet.from_config(cfg_p1)
+
+
+@pytest.fixture()
+def env_p1(cfg_p1):
+    set_seed(int(cfg_p1.seed))
+    e = SyntheticGridEnv(cfg_p1)
+    e.reset(seed=5)
+    return e

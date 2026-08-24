@@ -18,15 +18,22 @@ from open_player.core.types import WorldState
 from open_player.world.model import Prediction
 
 
-def entity_prediction_loss(prediction: Prediction, target: WorldState) -> Tensor:
-    """MSE over [B, N, D_entity], weighted by target existence probability."""
-    err = (prediction.entities_pred - target.entities_t) ** 2
+def entity_prediction_loss(prediction: Prediction, target: WorldState, detach_target: bool = False) -> Tensor:
+    """MSE over [B, N, D_entity], weighted by target existence probability.
+
+    detach_target=True is used in Phase 1 (learned vision): the target
+    features come from the same encoder and are treated as data, so only the
+    prediction path carries gradient.
+    """
+    tgt = target.entities_t.detach() if detach_target else target.entities_t
+    err = (prediction.entities_pred - tgt) ** 2
     weight = target.beliefs_t[:, :, 4:5].detach().clamp(min=0.0)  # existence
     return (err * weight).sum() / max(weight.sum(), 1.0)
 
 
-def spatial_prediction_loss(prediction: Prediction, target: WorldState) -> Tensor:
-    return torch.nn.functional.mse_loss(prediction.spatial_pred, target.spatial_t)
+def spatial_prediction_loss(prediction: Prediction, target: WorldState, detach_target: bool = False) -> Tensor:
+    tgt = target.spatial_t.detach() if detach_target else target.spatial_t
+    return torch.nn.functional.mse_loss(prediction.spatial_pred, tgt)
 
 
 def change_prediction_loss(prediction: Prediction, change_label: Tensor) -> Tensor:
@@ -45,12 +52,13 @@ def prediction_losses(
     change_label: Optional[Tensor] = None,
     target_z: Optional[Tensor] = None,
     weights: Optional[Dict[str, float]] = None,
+    detach_targets: bool = False,
 ) -> Dict[str, Tensor]:
     """All unweighted terms plus the weighted total ('total' key)."""
     w = dict(weights or {})
     losses: Dict[str, Tensor] = {}
-    losses["entity"] = entity_prediction_loss(prediction, target_state)
-    losses["spatial"] = spatial_prediction_loss(prediction, target_state)
+    losses["entity"] = entity_prediction_loss(prediction, target_state, detach_target=detach_targets)
+    losses["spatial"] = spatial_prediction_loss(prediction, target_state, detach_target=detach_targets)
     if change_label is not None:
         losses["change"] = change_prediction_loss(prediction, change_label)
     if target_z is not None:
@@ -61,3 +69,28 @@ def prediction_losses(
         total = total + float(w.get(name, 1.0)) * value
     losses["total"] = total
     return losses
+
+
+def learned_change_loss(change_logits: torch.Tensor, change_label: torch.Tensor) -> torch.Tensor:
+    """BCE for the LearnedChangePredictor (z_t, action, z_t1 -> change)."""
+    return torch.nn.functional.binary_cross_entropy_with_logits(
+        change_logits[:, 1], change_label.to(dtype=change_logits.dtype)
+    )
+
+
+def boundary_loss(boundary_score: torch.Tensor, boundary_label: torch.Tensor) -> torch.Tensor:
+    """BCE for the learned boundary score (semantic events are boundaries)."""
+    return torch.nn.functional.binary_cross_entropy(
+        boundary_score.view(-1), boundary_label.to(dtype=boundary_score.dtype).view(-1)
+    )
+
+
+def spatial_variance_loss(spatial_features: torch.Tensor) -> torch.Tensor:
+    """Anti-collapse regularizer for learned spatial features.
+
+    Returns -mean(channel std over spatial dims): minimising it pushes the
+    learned spatial representation away from a constant map (which would
+    trivially satisfy the prediction loss but carry no information).
+    """
+    std = spatial_features.std(dim=(2, 3))
+    return -std.mean()

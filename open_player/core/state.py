@@ -3,6 +3,10 @@
 The neural world is a batched tensor object (WorldState); the environment
 produces structured observations; this module (with the schemas) owns the
 conversion so no other module hard-codes tensor layouts.
+
+Phase 1 additions: grid_channel (exact grid-resolution downsampling) and
+world_state_from_tensors (assemble a WorldState directly from tensors, which
+lets the learned vision encoder keep its computation graph).
 """
 from __future__ import annotations
 
@@ -186,6 +190,71 @@ def build_world_state(
     )
 
 
+def world_state_from_tensors(
+    schema: SchemaSet,
+    entity_ids: List[str],
+    semantic_types: List[str],
+    entities_t: torch.Tensor,
+    beliefs_t: torch.Tensor,
+    relations_t: torch.Tensor,
+    spatial_t: torch.Tensor,
+    dynamics_t: Optional[torch.Tensor] = None,
+    temporal_t: Optional[torch.Tensor] = None,
+    global_t: Optional[torch.Tensor] = None,
+    uncertainty_t: Optional[torch.Tensor] = None,
+    t: int = 0,
+    device: Any = "cpu",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> WorldState:
+    """Assemble a WorldState directly from tensors.
+
+    Unlike build_world_state, this does NOT convert through numpy: tensors
+    that carry a computation graph (e.g. learned vision features) keep it,
+    so gradients can flow back into the encoder.  Missing tensors default to
+    zeros of the schema shape.
+    """
+    N = schema.max_entities
+    ids = list(entity_ids) + [f"empty-{i}" for i in range(len(entity_ids), N)]
+    types = list(semantic_types) + ["empty"] * (N - len(semantic_types))
+
+    def pad(x: torch.Tensor, shape: Sequence[int]) -> torch.Tensor:
+        out = torch.zeros(shape, dtype=x.dtype, device=x.device)
+        n = min(x.shape[0], shape[0])
+        out[:n] = x[:n]
+        return out.unsqueeze(0)
+
+    ent = pad(entities_t, (N, schema.entity.D_entity))
+    bel = pad(beliefs_t, (N, schema.belief.dim))
+    rel = torch.zeros(1, N, N, schema.relation.R, dtype=relations_t.dtype, device=relations_t.device)
+    m = min(relations_t.shape[0], N)
+    rel[0, :m, :m] = relations_t[:m, :m]
+
+    if dynamics_t is None:
+        dynamics_t = torch.zeros(schema.dynamics_dim, device=ent.device)
+    if temporal_t is None:
+        temporal_t = torch.zeros(schema.temporal_dim, device=ent.device)
+    if global_t is None:
+        global_t = torch.zeros(schema.global_dim, device=ent.device)
+    if uncertainty_t is None:
+        uncertainty_t = torch.zeros(schema.uncertainty_dim, device=ent.device)
+
+    return WorldState(
+        entity_ids=ids,
+        semantic_types=types,
+        entities_t=ent.to(device=device),
+        beliefs_t=bel.to(device=device),
+        relations_t=rel.to(device=device),
+        spatial_t=spatial_t.to(device=device).unsqueeze(0),
+        dynamics_t=dynamics_t.to(device=device).unsqueeze(0),
+        temporal_t=temporal_t.to(device=device).unsqueeze(0),
+        global_t=global_t.to(device=device).unsqueeze(0),
+        uncertainty_t=uncertainty_t.to(device=device).unsqueeze(0),
+        t=t,
+        schema=schema,
+        metadata=metadata or {},
+    )
+
+
 def empty_world_state(schema: SchemaSet, batch: int = 1, device: Any = "cpu", t: int = 0) -> WorldState:
     """A fully-empty WorldState of the right shapes (padding / init helper)."""
     N = schema.max_entities
@@ -263,6 +332,26 @@ def grid_channel(state: WorldState, channel: int, batch: int = 0) -> np.ndarray:
             out[gy, gx] = sp[y0:y1, x0:x1].max()
     cache[key] = out
     return out
+
+
+#: Fallback memory-channel indices for structured grids (Phase 0 states).
+_STRUCT_CHANNELS = {"occupancy": 0, "wall": 1, "threat": 2, "novelty": 3, "resource": 4, "visited": 7}
+
+
+def structured_grid(state: WorldState, name: str, batch: int = 0) -> np.ndarray:
+    """Grid-resolution structured map (wall / threat / novelty / visited ...).
+
+    Phase 1 (learned vision): the spatial memory tensor holds LEARNED
+    features, so the encoder stores the environment's structured grid
+    channels in metadata['struct_grid']; rule skills and intrinsic reward
+    consume those.  Phase 0 states fall back to the spatial memory channels.
+    """
+    sg = state.metadata.get("struct_grid")
+    if sg and name in sg:
+        return np.asarray(sg[name], dtype=np.float32)
+    if name in _STRUCT_CHANNELS:
+        return grid_channel(state, _STRUCT_CHANNELS[name], batch=batch)
+    return grid_channel(state, 0, batch=batch)
 
 
 def entity_index(state: WorldState, entity_id: str) -> int:

@@ -17,12 +17,12 @@ class OutcomeEvaluator:
     """
 
     DEFAULT_AFFINITY: Dict[str, Dict[str, float]] = {
-        "task": {"collect": 1.0, "approach_resource": 0.8, "explore": 0.3, "avoid_threat": 0.1},
-        "exploration": {"explore": 1.0, "approach_resource": 0.2, "avoid_threat": 0.2, "collect": 0.3},
-        "survival": {"avoid_threat": 1.0, "explore": 0.4, "approach_resource": 0.1, "collect": 0.1},
-        "learning": {"explore": 0.8, "approach_resource": 0.6, "collect": 0.5, "avoid_threat": 0.2},
-        "information": {"explore": 1.0, "approach_resource": 0.3, "avoid_threat": 0.2, "collect": 0.2},
-        "skill_improvement": {"collect": 0.7, "approach_resource": 0.7, "explore": 0.5, "avoid_threat": 0.3},
+        "task": {"collect": 1.0, "approach_resource": 0.8, "explore": 0.3, "avoid_threat": 0.1, "neural_explore": 0.3},
+        "exploration": {"neural_explore": 1.0, "explore": 0.8, "approach_resource": 0.2, "avoid_threat": 0.2, "collect": 0.3},
+        "survival": {"avoid_threat": 1.0, "explore": 0.4, "approach_resource": 0.1, "collect": 0.1, "neural_explore": 0.3},
+        "learning": {"neural_explore": 0.9, "explore": 0.8, "approach_resource": 0.6, "collect": 0.5, "avoid_threat": 0.2},
+        "information": {"neural_explore": 1.0, "explore": 0.9, "approach_resource": 0.3, "avoid_threat": 0.2, "collect": 0.2},
+        "skill_improvement": {"collect": 0.7, "approach_resource": 0.7, "neural_explore": 0.7, "explore": 0.5, "avoid_threat": 0.3},
     }
 
     def __init__(self, config: Any, procedural_memory: Optional[Any] = None) -> None:
@@ -39,12 +39,12 @@ class OutcomeEvaluator:
             success = self.procedural.success_rate(skill.name, default=0.5)
         score = 0.5 * base + 0.25 * pred.expected_utility + 0.15 * success + 0.1 * rollout_utility
         # safety term: when a threat is near the player, prefer evasion
-        from open_player.core.state import grid_channel
+        from open_player.core.state import structured_grid
         threat_near = 0.0
         try:
             player = next((e for e in state.entity_states(0) if e.semantic_type == "player"), None)
             if player is not None:
-                threat = grid_channel(state, 2)
+                threat = structured_grid(state, "threat")
                 gx = int(round(float(player.position[0])))
                 gy = int(round(float(player.position[1])))
                 if 0 <= gx < threat.shape[1] and 0 <= gy < threat.shape[0]:

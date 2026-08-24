@@ -93,6 +93,16 @@ class WorldModel(nn.Module):
         )
         self.change_head = nn.Linear(self.latent_dim, 2)
 
+        # Phase 1: learned change / boundary predictor (opt-in, config-driven)
+        self.change_predictor = None
+        if bool(config.get("event_pred.enabled", False)):
+            from open_player.world.change import LearnedChangePredictor
+            self.change_predictor = LearnedChangePredictor(
+                latent_dim=self.latent_dim,
+                num_actions=num_actions,
+                hidden=int(config.get("event_pred.hidden", 64)),
+            )
+
     # ------------------------------------------------------------------ #
     # Prediction API
     # ------------------------------------------------------------------ #
@@ -143,7 +153,7 @@ class WorldModel(nn.Module):
     # ------------------------------------------------------------------ #
     # Loss / update API
     # ------------------------------------------------------------------ #
-    def loss(self, prediction: Prediction, target_state: WorldState, change_label: Optional[Tensor] = None, target_z: Optional[Tensor] = None) -> Dict[str, Tensor]:
+    def loss(self, prediction: Prediction, target_state: WorldState, change_label: Optional[Tensor] = None, target_z: Optional[Tensor] = None, detach_targets: bool = False) -> Dict[str, Tensor]:
         """Unweighted per-term losses plus the weighted total."""
         from open_player.training.losses import prediction_losses
 
@@ -153,6 +163,7 @@ class WorldModel(nn.Module):
             change_label=change_label,
             target_z=target_z,
             weights=self.loss_weights,
+            detach_targets=detach_targets,
         )
 
     def update(
@@ -194,6 +205,112 @@ class WorldModel(nn.Module):
         losses = self.loss(pred, next_state, change_label=change_label, target_z=target_z)
         metrics = {k: float(v.detach().cpu()) for k, v in losses.items() if isinstance(v, Tensor)}
         return losses["total"], metrics
+
+    # ------------------------------------------------------------------ #
+    # Phase 1: multi-step training + evaluation
+    # ------------------------------------------------------------------ #
+    def multi_step_loss(
+        self,
+        state: WorldState,
+        actions: Sequence[int],
+        target_states: List[WorldState],
+        teacher_forcing: float = 1.0,
+        detach_targets: bool = True,
+    ) -> Dict[str, Tensor]:
+        """Multi-step losses at the configured horizons (step4 / step8).
+
+        teacher_forcing in [0, 1]: 1.0 = pure teacher forcing, 0.0 = pure
+        model rollout, in between = per-step teacher-forcing probability
+        (mixed rollout, the scheduled-rollout curriculum).
+        """
+        from open_player.training.losses import entity_prediction_loss, latent_consistency_loss, spatial_prediction_loss
+
+        horizons = [int(h) for h in self.config.get("multi_step.horizons", [])]
+        if not horizons:
+            return {"total_ms": torch.zeros((), device=state.entities_t.device)}
+        max_h = max(horizons)
+        weights = dict(self.config.get("multi_step.loss_weights", {}))
+        w = dict(self.loss_weights)
+        device = state.entities_t.device
+        z_cur = self.representation(state).z
+        terms: Dict[str, Tensor] = {}
+        for k in range(1, max_h + 1):
+            if k > len(target_states):
+                break
+            a = torch.full((z_cur.shape[0],), int(actions[k - 1]), dtype=torch.long, device=device)
+            if k > 1 and float(teacher_forcing) > 0.0:
+                use_tf = float(teacher_forcing) >= 1.0 or torch.rand(1, device=device).item() < float(teacher_forcing)
+                if use_tf:
+                    z_cur = self.representation(target_states[k - 2]).z.detach()
+            pred = self._predict_from_z(z_cur, a)
+            z_cur = pred.z_next
+            if k in horizons:
+                tgt = target_states[k - 1]
+                term = (
+                    float(w.get("entity", 1.0)) * entity_prediction_loss(pred, tgt, detach_target=detach_targets)
+                    + float(w.get("spatial", 0.1)) * spatial_prediction_loss(pred, tgt, detach_target=detach_targets)
+                    + float(w.get("latent", 0.1)) * latent_consistency_loss(pred, self.representation(tgt).z.detach())
+                )
+                terms[f"step{k}"] = term
+        total = torch.zeros((), device=device)
+        for name, term in terms.items():
+            total = total + float(weights.get(name, 0.0)) * term
+        terms["total_ms"] = total
+        return terms
+
+    @torch.no_grad()
+    def prediction_errors(
+        self,
+        state: WorldState,
+        actions: Sequence[int],
+        target_states: List[WorldState],
+        horizons: Sequence[int] = (1, 4, 8),
+    ) -> Dict[str, float]:
+        """Model-rollout prediction errors per horizon (Phase 1 benchmark).
+
+        Reports entity / spatial / latent errors for each horizon, the
+        teacher-forcing upper bound for long horizons, and the learned change
+        probability on the first transition.
+        """
+        device = state.entities_t.device
+        max_h = max(horizons)
+        errors: Dict[str, float] = {}
+        z_cur = self.representation(state).z
+        for k in range(1, max_h + 1):
+            if k > len(target_states):
+                break
+            a = torch.full((z_cur.shape[0],), int(actions[k - 1]), dtype=torch.long, device=device)
+            pred = self._predict_from_z(z_cur, a)
+            z_cur = pred.z_next
+            if k in horizons:
+                tgt = target_states[k - 1]
+                errors[f"step{k}_entity"] = float(torch.nn.functional.mse_loss(pred.entities_pred, tgt.entities_t))
+                errors[f"step{k}_spatial"] = float(torch.nn.functional.mse_loss(pred.spatial_pred, tgt.spatial_t))
+                errors[f"step{k}_latent"] = float(torch.nn.functional.mse_loss(pred.z_next, self.representation(tgt).z))
+        for k in horizons:
+            if k <= 1 or k > len(target_states):
+                continue
+            z_tf = self.representation(target_states[k - 2]).z
+            a = torch.full((z_tf.shape[0],), int(actions[k - 1]), dtype=torch.long, device=device)
+            pred = self._predict_from_z(z_tf, a)
+            errors[f"step{k}_entity_tf"] = float(torch.nn.functional.mse_loss(pred.entities_pred, target_states[k - 1].entities_t))
+        if self.change_predictor is not None and len(target_states) >= 1:
+            z0 = self.representation(state).z
+            z1 = self.representation(target_states[0]).z
+            a0 = torch.full((z0.shape[0],), int(actions[0]), dtype=torch.long, device=device)
+            logits, boundary = self.change_predictor(z0, a0, z1)
+            errors["change_prob"] = float(torch.sigmoid(logits[:, 1]).mean())
+            errors["boundary_prob"] = float(boundary.mean())
+        return errors
+
+    def predict_change(self, state: WorldState, action: Tensor | int, next_state: WorldState) -> Tuple[Tensor, Tensor]:
+        """(change_logits, boundary_score) from the learned predictor."""
+        if self.change_predictor is None:
+            raise RuntimeError("learned change predictor is disabled (event_pred.enabled=false)")
+        z_t = self.representation(state).z
+        z_t1 = self.representation(next_state).z
+        a = self._action_tensor(action, z_t.shape[0], z_t.device)
+        return self.change_predictor(z_t, a, z_t1)
 
     # ------------------------------------------------------------------ #
     def _action_tensor(self, action: Tensor | int, batch: int, device: Any) -> Tensor:

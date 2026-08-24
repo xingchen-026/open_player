@@ -200,6 +200,105 @@ def default_config() -> Config:
     return Config(_DEFAULT_CONFIG)
 
 
+_PHASE1_DEFAULTS: Dict[str, Any] = {
+    "environment": {
+        "grid_size": 12,
+        "num_enemies": 2,
+        "num_resources": 4,
+        "fog_radius": 5,
+        "max_steps": 120,
+        "player_hp": 4,
+        "enemy_move_prob": 0.6,
+        "enemy_attack_prob": 0.4,
+        "wall_density": 0.05,
+        "resource_cluster": True,
+        "render_rgb": True,
+    },
+    "vision": {
+        "enabled": True,
+        "input_height": 90,
+        "input_width": 160,
+        "channels": [32, 64, 128, 256],
+        "spatial_channels": 16,
+        "patch_hidden": 256,
+        "patch_out": 24,
+        "detach_targets": True,
+        "spatial_reg": 0.05,
+    },
+    "multi_step": {"horizons": [4, 8], "loss_weights": {"step1": 1.0, "step4": 0.5, "step8": 0.25}, "window": 8},
+    "rollout_schedule": {
+        "initial_teacher_forcing": 0.9,
+        "final_teacher_forcing": 0.2,
+        "anneal_steps": 5000,
+        "rollout_ratio": 0.2,
+    },
+    "event_pred": {"enabled": True, "hidden": 64, "conf_blend": 0.5, "loss_weight": 1.0},
+    "intrinsic": {
+        "alpha": 1.0,
+        "beta": 0.3,
+        "gamma": 0.2,
+        "risk_penalty": 0.5,
+        "repetition_penalty": 0.2,
+        "novelty_decay": 0.99,
+        "visit_count_cap": 10,
+        "info_goal_bonus": 0.3,
+    },
+    "skill_training": {
+        "bc_epochs": 15,
+        "bc_batch_size": 64,
+        "lr": 0.001,
+        "min_trajectory_steps": 8,
+        "success_min_coverage": 0.15,
+        "success_goal_succeeded": True,
+        "train_steps": 400,
+        "skill_name": "neural_explore",
+    },
+    "evaluation": {
+        "eval_interval": 500,
+        "eval_episodes": 4,
+        "eval_max_steps": 100,
+        "curve_steps": [1000, 5000, 10000, 20000],
+        "adaptation_steps": 1000,
+        "log_dir": "runs/phase1",
+    },
+    "transfer": {
+        "world_a": {
+            "name": "world_a_open",
+            "grid_size": 12,
+            "num_enemies": 1,
+            "num_resources": 4,
+            "fog_radius": 6,
+            "max_steps": 120,
+            "player_hp": 6,
+            "enemy_move_prob": 0.3,
+            "enemy_attack_prob": 0.3,
+            "wall_density": 0.03,
+            "resource_cluster": True,
+            "render_rgb": True,
+        },
+        "world_b": {
+            "name": "world_b_narrow",
+            "grid_size": 14,
+            "num_enemies": 2,
+            "num_resources": 6,
+            "fog_radius": 4,
+            "max_steps": 150,
+            "player_hp": 6,
+            "enemy_move_prob": 0.7,
+            "enemy_attack_prob": 0.6,
+            "wall_density": 0.16,
+            "resource_cluster": False,
+            "render_rgb": True,
+        },
+    },
+}
+
+
+def phase1_config() -> Config:
+    """Phase 0 defaults + Phase 1 sections (mirrors configs/phase1.yaml)."""
+    return Config(_DEFAULT_CONFIG).merge(_PHASE1_DEFAULTS)
+
+
 def resolve_device(cfg: Config) -> torch.device:
     """Resolve cfg.device ('auto' -> cuda if available, else cpu)."""
     spec = cfg.get("device", "auto")

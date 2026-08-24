@@ -2,16 +2,16 @@
 
 低算力、非 Transformer 主导的通用游戏学习智能体基础框架。
 
-Phase 0 目标：跑通一个最小、可测试、可训练、可扩展的 Learning Agent Core，
-并在 Synthetic Grid World 上形成完整闭环：
+- Phase 0：跑通最小、可测试、可训练、可扩展的 Learning Agent Core
+  （Synthetic Grid World 完整闭环）。
+- Phase 1：Learning Validation —— 证明 Open Player 开始真正通过经验学习，
+  而不是主要依赖启发式规则（learned vision / multi-step world model /
+  learned change prediction / NeuralSkill / intrinsic exploration /
+  transfer evaluation）。
 
-    Synthetic World -> Observation -> WorldState -> WorldModel -> Prediction
-         -> Loss -> Backprop -> Events -> Episodes -> Goals -> Planner
-         -> Skills -> Actions -> Synthetic World
-
-本仓库是 Phase 0 的实现。架构决策已冻结，本实现不引入 Transformer / VLM /
-LLM / MCTS / 大型 RL / Vector DB，一切按结构化状态 + 小型神经模块 +
-显式记忆 + 世界模型 + 层级规划的原则实现。
+架构决策已冻结，本项目不引入 Transformer / VLM / LLM / MCTS / 大型 RL /
+Vector DB，一切按结构化状态 + 小型神经模块 + 显式记忆 + 世界模型 +
+层级规划的原则实现。
 
 --------------------------------------------------------------------------------
 
@@ -146,6 +146,80 @@ LLM / MCTS / 大型 RL / Vector DB，一切按结构化状态 + 小型神经模�
 
 --------------------------------------------------------------------------------
 
+## Phase 1 做到了什么（Learning Validation）
+
+1. P1 Learned Vision（约 1.06M 参数，< 3M）
+
+   - RGB (160x90) -> LearnedVisionEncoder（轻量 CNN，无 ViT/Transformer）->
+     学习到的空间特征图 [16,32,32] + 每实体 patch 特征 -> WorldState。
+   - 位置/速度等结构化量仍来自环境观测（Phase 1 允许），视觉特征由
+     世界模型的预测损失端到端训练：CNN 学到的是"对未来预测有用的"
+     表示，目标 detach 防止表示坍缩。
+   - DummyVisionEncoder 未动，Phase 0 路径继续可用。
+
+2. P2 Multi-step World Model（1/4/8 步）
+
+   - L_total = L_1step + lambda4 * L_4step + lambda8 * L_8step
+     （lambda4=0.5 < 1，lambda8=0.25 < lambda4，全部在 configs/phase1.yaml）。
+   - Scheduled Rollout：teacher forcing 0.9 -> 0.2 退火 + rollout_ratio
+     控制纯 model rollout 比例（Teacher Forcing -> Mixed Rollout ->
+     Model Rollout）。
+   - 评估输出 1/4/8 步 entity / spatial / latent / change 误差，并给出
+     teacher-forcing 上界；实测 4/8 步误差不爆炸（latent 误差随步数
+     缓增，长期预测具备可学习性）。
+
+3. P3 Learned Change / Boundary Prediction
+
+   - LearnedChangePredictor（z_t, action, z_t1 -> change logits +
+     boundary score，2 层 MLP，无 Event Transformer）。
+   - HybridEventDetector：heuristic event 置信度 = blend * learned +
+     (1-blend) * heuristic，learned 信号写入 event metadata；
+     HeuristicEventDetector 原样保留。
+
+4. P4 NeuralSkill（< 1M 参数）
+
+   - NeuralSkill = MLP policy + learned termination（Option 接口：
+     can_start / act / should_terminate / predict_outcome / update /
+     memory / metadata）。
+   - 训练：RuleSkill 轨迹收集 -> 成功轨迹过滤 -> behavior cloning。
+   - 策略输入包含网格级 novelty/wall/threat 图 + 玩家位置 one-hot
+     （不做单一 embedding 坍缩），动作带几何有效性 mask。
+   - 实测（开放地图）：BC 准确率 90.7%，探索覆盖率 0.98（rule 教师 1.0，
+     random 0.37-0.58）—— 行为真正来自经验。
+
+5. P5 Intrinsic Exploration
+
+   - r_intrinsic = alpha*prediction_error + beta*novelty*decay^visits
+     + gamma*information_gain - risk_penalty*threat
+     - repetition_penalty*repeat_action（全参数进 config）。
+   - visit count 驱动的 novelty 衰减、威胁风险惩罚、重复动作惩罚防止
+     "撞墙/追敌/原地重复"。
+   - 信号真实参与决策：GoalManager 的 exploration/information goal
+     优先级受 intrinsic novelty 与 world-model uncertainty 调制；
+     ExploreSkill 的目标单元由 intrinsic utility map 选择。
+
+6. P6 Transfer / Learning Efficiency
+
+   - World A（开放地图、资源聚簇、慢敌人）与 World B（窄走廊、资源
+     分散、快敌人）结构不同（仅非 seed 差异）。
+   - 训练 A、zero-shot 测 B、B 上 1000 步短适应后复测；
+     对比 Random / Rule / Phase 0 Agent / Phase 1 Agent 四类 baseline。
+   - ExperimentLogger（CSV + JSONL）记录 step / loss / prediction error /
+     intrinsic reward / goal success / coverage / skill success /
+     transfer score，形成 learning curve 与 transfer curve。
+
+7. 其它
+
+   - SyntheticGridVecEnv：单进程 N 并行世界（评估与技能数据收集使用）。
+   - 总神经核心约 2.9M 参数（vision 1.06M + world model 1.85M +
+     change predictor ~30k + NeuralSkill ~0.1M），远低于 15M 预算。
+   - player.evaluate / player.train_skill / player.evaluate_transfer
+     为新增 API，player.learn / player.run 及全部 Phase 0 内部 API 不变。
+   - checkpoint 保存/恢复 world model + vision + change predictor +
+     NeuralSkill（版本化，向后兼容 Phase 0 checkpoint）。
+
+--------------------------------------------------------------------------------
+
 ## 安装
 
 要求：Python 3.11+，PyTorch，NumPy，PyYAML，pytest。
@@ -164,27 +238,24 @@ Windows / Linux / macOS 均可；无 CUDA 时自动回落到 CPU。
 
 ## 快速开始
 
-1. 端到端 Demo（Agent 完成"找到资源并收集"）：
-
-    python examples/phase0_demo.py --render
-
-2. 训练（Self-Supervised World Learning + checkpoint）：
+Phase 0（保持可用）：
 
     python examples/phase0_train.py --steps 2000 --checkpoint checkpoints/phase0.pt
-
-3. 用训练好的 checkpoint 再跑 Demo：
-
-    python examples/phase0_demo.py --checkpoint checkpoints/phase0.pt
-
-4. Checkpoint 保存/加载验证：
-
+    python examples/phase0_demo.py --checkpoint checkpoints/phase0.pt --render
     python examples/phase0_checkpoint.py
 
-5. 测试：
+Phase 1（Learning Validation）：
+
+    python examples/phase1_train.py --steps 2000 --train-skill      # 训练 + 学习曲线
+    python examples/phase1_evaluate.py --checkpoint checkpoints/phase1.pt
+    python examples/phase1_transfer.py --steps 2000 --adaptation-steps 1000
+    python examples/phase1_demo.py --checkpoint checkpoints/phase1.pt --render
+
+测试（Phase 0 + Phase 1 共 77 个用例）：
 
     python -m pytest
 
-6. 最简 API 使用：
+最简 API 使用：
 
     from open_player.core.config import default_config
     from open_player.agent.player import Player
@@ -220,11 +291,23 @@ Windows / Linux / macOS 均可；无 CUDA 时自动回落到 CPU。
     │   ├── environments/    # synthetic: world / env / renderer
     │   ├── training/        # trainer / losses / replay / checkpoint
     │   └── agent/           # player
-    ├── tests/
+    ├── tests/                      # 45 (Phase 0) + 32 (Phase 1) 用例
     └── examples/
-        ├── phase0_train.py
-        ├── phase0_demo.py
-        └── phase0_checkpoint.py
+        ├── phase0_train.py / phase0_demo.py / phase0_checkpoint.py
+        ├── phase1_train.py / phase1_evaluate.py
+        └── phase1_transfer.py / phase1_demo.py
+
+Phase 1 新增模块：
+
+    open_player/observation/vision.py     # LearnedVisionEncoder (RGB -> WorldState)
+    open_player/world/change.py           # LearnedChangePredictor
+    open_player/motivation/intrinsic.py   # IntrinsicReward + VisitCounter
+    open_player/skills/neural.py          # NeuralSkill + StateFeaturizer
+    open_player/training/skill_trainer.py # behavior cloning trainer
+    open_player/environments/synthetic/vector_env.py   # SyntheticGridVecEnv
+    open_player/environments/transfer.py  # World A / World B
+    open_player/evaluation/               # logger / metrics / baselines / benchmark
+    configs/phase1.yaml                   # Phase 1 全量配置
 
 --------------------------------------------------------------------------------
 
@@ -263,16 +346,19 @@ CLI 覆盖示例：
 ## 已知限制
 
 - 1-step 世界模型在 1500 步后 entity loss 约 0.3-0.5（归一化特征空间），
-  表现为对静态特征的低误差与对快速变化的较高误差；change head 对高频
-  语义事件的判别仍在早期。
-- 探索策略依赖空间 novelty 通道与威胁回避，启发式较强；换环境需要
-  重新配参。
-- 训练速度为约 25 steps/s（CPU 与 GPU 接近，瓶颈在 Python 侧的环境
-  仿真与状态构建，GPU 仅加速模型部分）；按"不追求实时"的 Phase 0
-  目标足够，后续可用批处理仿真优化。
+  表现为对静态特征的低误差与对快速变化的较高误差；learned change
+  预测器对高频语义事件的判别仍在早期。
+- 探索策略依赖空间 novelty 通道与威胁回避（Phase 1 已由 intrinsic
+  utility 调制，但底层通道仍来自合成环境）；换环境需要重新配参。
+- 训练速度约 15-25 steps/s（vision 路径 CPU 约 5 steps/s，GPU 更快；
+  瓶颈在 Python 侧环境仿真与状态构建）；按"不追求实时"的目标足够，
+  向量化环境已用于评估与数据收集。
+- NeuralSkill 目前为 BC 训练（无 RL 微调），且策略输入包含网格级地图
+  特征（不依赖真视觉的端到端行为学习仍是后续工作）。
 - Episode 分段是 goal 边界 + 环境边界的混合启发式，没有学习式
   segmentation。
 - 合成环境不是真实游戏；接入真实环境属于后续 Phase。
+- Phase 1 的结论以本仓库的合成世界实验为准，未在商业游戏上验证。
 
 --------------------------------------------------------------------------------
 

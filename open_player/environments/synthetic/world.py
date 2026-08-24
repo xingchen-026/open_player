@@ -49,6 +49,8 @@ class GridWorld:
         player_hp: int = 3,
         enemy_move_prob: float = 0.8,
         enemy_attack_prob: float = 0.5,
+        wall_density: Optional[float] = None,
+        resource_cluster: bool = False,
         seed: int = 0,
     ) -> None:
         self.grid_size = int(grid_size)
@@ -58,6 +60,8 @@ class GridWorld:
         self.player_hp_max = int(player_hp)
         self.enemy_move_prob = float(enemy_move_prob)
         self.enemy_attack_prob = float(enemy_attack_prob)
+        self.wall_density = None if wall_density is None else float(wall_density)
+        self.resource_cluster = bool(resource_cluster)
         self.rng = np.random.default_rng(seed)
         self.reset()
 
@@ -73,7 +77,9 @@ class GridWorld:
         self.collected_this_step = False
         self.explored_this_step = False
 
-        # Walls: full border plus a few deterministic interior blocks.
+        # Walls: full border plus interior blocks.  Phase 0 default keeps the
+        # original block layout; wall_density switches to density-based walls
+        # (used by the Phase 1 transfer worlds for structural variation).
         self.walls: Set[Tuple[int, int]] = set()
         for x in range(g):
             self.walls.add((x, 0))
@@ -81,13 +87,26 @@ class GridWorld:
         for y in range(g):
             self.walls.add((0, y))
             self.walls.add((g - 1, y))
-        n_blocks = max(1, g // 4)
-        for _ in range(n_blocks):
-            bx = int(self.rng.integers(2, g - 4))
-            by = int(self.rng.integers(2, g - 4))
-            for dx in range(2):
-                for dy in range(1):
-                    self.walls.add((bx + dx, by + dy))
+        if self.wall_density is not None:
+            target = max(0, int(self.wall_density * g * g))
+            placed = 0
+            attempts = 0
+            while placed < target and attempts < 500:
+                attempts += 1
+                bx = int(self.rng.integers(1, g - 3))
+                by = int(self.rng.integers(1, g - 3))
+                block = [(bx + dx, by + dy) for dx in range(2) for dy in range(1)]
+                if all(c not in self.walls for c in block) and placed + len(block) <= target:
+                    self.walls.update(block)
+                    placed += len(block)
+        else:
+            n_blocks = max(1, g // 4)
+            for _ in range(n_blocks):
+                bx = int(self.rng.integers(2, g - 4))
+                by = int(self.rng.integers(2, g - 4))
+                for dx in range(2):
+                    for dy in range(1):
+                        self.walls.add((bx + dx, by + dy))
 
         def free_cell() -> np.ndarray:
             while True:
@@ -103,11 +122,41 @@ class GridWorld:
                 pos = free_cell()
             self.enemies.append(_Enemy(entity_id=f"enemy-{i}", position=pos))
         self.resources: List[_Resource] = []
-        for i in range(self.num_resources):
-            pos = free_cell()
-            while np.abs(pos - self.player_pos).sum() < 2:
+        if self.resource_cluster:
+            # clustered resource distribution: one random center, radius 2
+            center = free_cell()
+            cluster_cells = [
+                center + np.array([dx, dy], dtype=np.float32)
+                for dx in range(-2, 3)
+                for dy in range(-2, 3)
+            ]
+            self.rng.shuffle(cluster_cells)
+            ci = 0
+            for i in range(self.num_resources):
+                pos = None
+                while ci < len(cluster_cells):
+                    cand = cluster_cells[ci]
+                    ci += 1
+                    cell = (int(cand[0]), int(cand[1]))
+                    if cell in self.walls:
+                        continue
+                    if not (0 < cell[0] < g - 1 and 0 < cell[1] < g - 1):
+                        continue
+                    if np.abs(cand - self.player_pos).sum() < 2:
+                        continue
+                    pos = cand
+                    break
+                if pos is None:
+                    pos = free_cell()
+                    while np.abs(pos - self.player_pos).sum() < 2:
+                        pos = free_cell()
+                self.resources.append(_Resource(entity_id=f"resource-{i}", position=pos))
+        else:
+            for i in range(self.num_resources):
                 pos = free_cell()
-            self.resources.append(_Resource(entity_id=f"resource-{i}", position=pos))
+                while np.abs(pos - self.player_pos).sum() < 2:
+                    pos = free_cell()
+                self.resources.append(_Resource(entity_id=f"resource-{i}", position=pos))
 
         self.visited: Set[Tuple[int, int]] = {(int(self.player_pos[0]), int(self.player_pos[1]))}
 

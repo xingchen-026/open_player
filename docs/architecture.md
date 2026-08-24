@@ -1,7 +1,8 @@
-# Open Player Phase 0 架构说明
+# Open Player 架构说明（Phase 0 + Phase 1）
 
-本文档描述 Phase 0 冻结架构在本实现中的落点。设计决策不改动，只说明
-"接口在哪里、数据怎么流、将来在哪里替换"。
+本文档描述冻结架构在本实现中的落点。设计决策不改动，只说明
+"接口在哪里、数据怎么流、将来在哪里替换"。Phase 1 章节只增不改：
+Phase 0 的所有结构与 API 保持稳定。
 
 --------------------------------------------------------------------------------
 
@@ -133,7 +134,48 @@ entity_states() 可按 schema 解码回结构化对象。
 ## 7. 性能
 
 - 目标：CPU 可运行、CUDA 自动启用、稳定跑数万步合成环境实验
-- 实测（本机）：约 25 steps/s（1500 步 < 90 秒）；GPU 加速模型部分，
-  环境与状态构建在 Python 侧
+- Phase 0 实测（本机）：约 25 steps/s（1500 步 < 90 秒）
+- Phase 1（vision 路径）：GPU 约 15-20 steps/s，CPU 约 5 steps/s
 - 若需提速：减小 batch / 实体数 / horizon / 空间分辨率（配置即可），
-  不改架构
+  不改架构；SyntheticGridVecEnv 已用于评估与数据收集的批处理
+
+--------------------------------------------------------------------------------
+
+## 8. Phase 1 数据流（Learning Validation）
+
+    RGB_t (160x90)
+      -> LearnedVisionEncoder (CNN ~1.06M)
+      -> 学习空间特征 [16,32,32] + 实体 patch 特征
+      -> WorldState_t（结构化张量不变；位置/速度来自结构化观测）
+      -> WorldModel (1/4/8 步预测, scheduled rollout 训练)
+      -> Prediction Error -> Intrinsic Reward（含 visit decay / risk /
+         repetition 惩罚）-> Goal 选择 + ExploreSkill 目标单元
+      -> Planner (heuristic 候选 + learned world model rollout)
+      -> Rule / Neural Skill -> Action -> Environment -> RGB_t+1
+
+    LearnedChangePredictor(z_t, a_t, z_t+1)
+      -> change logits + boundary score
+      -> HybridEventDetector 置信度融合
+
+## 9. Phase 1 模块替换点
+
+    LearnedVisionEncoder -> 更强视觉编码器（同一 ObservationEncoder 接口）
+    BC 训练 -> 追加 intrinsic reward fine-tuning（NeuralSkill.update 钩子）
+    LearnedChangePredictor -> 多类事件预测（接口不变）
+    UtilityGoalScorer -> learned scorer（GoalManager 已接 intrinsic 信号）
+    Planner rollout -> 更长/更优搜索（world model 已多步训练）
+
+## 10. Phase 1 关键设计决策
+
+- 视觉目标 detach（vision.detach_targets=true）：CNN 学习"可预测未来"
+  的特征，防止自预测表示坍缩；梯度经预测路径回传。
+- 多步损失只在序列窗口内以 teacher forcing / mixed / model rollout
+  三种模式采样；1 步损失权重最高（1.0 / 0.5 / 0.25）。
+- 每个 vision 状态的计算图由其 1 步更新消费后立即 detach，避免二次
+  backward；replay 与多步序列存 detach 状态。
+- StateFeaturizer 输入不做单一 embedding：实体池化 + global + spatial
+  统计 + 网格级地图 + 玩家位置 one-hot，<1M 参数的 MLP 即可学到空间
+  探索行为；动作带几何有效性 mask。
+- transfer World A / B 通过 wall_density / resource_cluster /
+  enemy_move_prob / enemy_attack_prob / grid_size 结构性地不同，
+  evaluation 环境与训练环境完全分离，B 的 hidden state 不参与训练。

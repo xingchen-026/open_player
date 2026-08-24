@@ -27,6 +27,7 @@ class Checkpointer:
         metrics: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         extra: Optional[Dict[str, Any]] = None,
+        modules: Optional[Dict[str, torch.nn.Module]] = None,
     ) -> str:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         payload = {
@@ -39,6 +40,7 @@ class Checkpointer:
             "metrics": dict(metrics or {}),
             "config": dict(config or {}),
             "extra": dict(extra or {}),
+            "module_states": None if not modules else {k: m.state_dict() for k, m in modules.items()},
         }
         torch.save(payload, path)
         self._prune(path)
@@ -50,6 +52,7 @@ class Checkpointer:
         model: torch.nn.Module,
         optimizer: Optional[torch.optim.Optimizer] = None,
         device: Any = "cpu",
+        modules: Optional[Dict[str, torch.nn.Module]] = None,
     ) -> Dict[str, Any]:
         payload = torch.load(path, map_location=device, weights_only=False)
         if payload.get("kind") != CHECKPOINT_KIND:
@@ -61,6 +64,11 @@ class Checkpointer:
         model.load_state_dict(payload["model_state"])
         if optimizer is not None and payload.get("optimizer_state") is not None:
             optimizer.load_state_dict(payload["optimizer_state"])
+        module_states = payload.get("module_states") or {}
+        if modules:
+            for name, m in modules.items():
+                if name in module_states:
+                    m.load_state_dict(module_states[name])
         return {
             "step": int(payload["step"]),
             "metrics": dict(payload.get("metrics", {})),

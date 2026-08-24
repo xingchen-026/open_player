@@ -12,7 +12,7 @@ from open_player.core.schema import (
     appearance_vector,
 )
 from open_player.core.specs import Environment, ObservationEncoder
-from open_player.core.state import build_world_state, empty_world_state, grid_channel, stack_world_states
+from open_player.core.state import build_world_state, empty_world_state, grid_channel, stack_world_states, structured_grid, world_state_from_tensors
 from open_player.core.types import (
     Action,
     BeliefState,
@@ -58,6 +58,8 @@ __all__ = [
     "build_world_state",
     "default_config",
     "grid_channel",
+    "structured_grid",
+    "world_state_from_tensors",
     "empty_world_state",
     "load_config",
     "resolve_device",

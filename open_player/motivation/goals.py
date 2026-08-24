@@ -94,11 +94,13 @@ class GoalManager:
                      priority=min(1.0, threat), source="intrinsic:survival", created_t=t)
             )
 
-        # exploration: world still novel
+        # exploration: world still novel (Phase 1: intrinsic novelty reward
+        # also contributes to the exploration priority)
         if motivation.get("novelty", 0.0) >= self.novelty_threshold:
+            bonus = float(env_info.get("intrinsic_novelty", 0.0)) * 0.3
             candidates.append(
                 Goal(goal_id=self._id("exploration"), goal_type=GoalType.EXPLORATION.value, target="unknown",
-                     priority=min(1.0, motivation["novelty"] + 0.3), source="intrinsic:novelty", created_t=t)
+                     priority=min(1.0, motivation["novelty"] + 0.3 + bonus), source="intrinsic:novelty", created_t=t)
             )
 
         # learning: world model error is high
@@ -108,11 +110,15 @@ class GoalManager:
                      priority=min(1.0, motivation["curiosity"] + 0.3), source="intrinsic:curiosity", created_t=t)
             )
 
-        # information: unknown area remains
-        if motivation.get("unknown", 0.0) > 0.05:
+        # information: unknown area remains; Phase 1: high world-model
+        # uncertainty raises the information-goal priority (epistemic drive)
+        if motivation.get("unknown", 0.0) > 0.05 or env_info.get("uncertainty_mean", 0.0) > 0.0:
+            info_bonus = float(self.config.get("intrinsic.info_goal_bonus", 0.0))
+            uncertainty = float(env_info.get("uncertainty_mean", 0.0))
             candidates.append(
                 Goal(goal_id=self._id("information"), goal_type=GoalType.INFORMATION.value, target="unknown",
-                     priority=0.4 * motivation["unknown"] + 0.1, source="intrinsic:information", created_t=t)
+                     priority=min(1.0, 0.4 * motivation["unknown"] + 0.1 + info_bonus * uncertainty),
+                     source="intrinsic:information", created_t=t)
             )
 
         if not candidates:

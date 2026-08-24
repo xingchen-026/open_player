@@ -7,9 +7,11 @@ from typing import Any, List, Optional
 import numpy as np
 
 from open_player.actions.controller import ActionController
-from open_player.core.state import grid_channel
+from open_player.core.state import structured_grid
 from open_player.core.types import Action, EntityState, WorldState
 from open_player.skills.base import OutcomePrediction, Skill
+
+_CHANNEL_NAMES = {0: "occupancy", 1: "wall", 2: "threat", 3: "novelty", 4: "resource", 7: "visited"}
 
 
 class RuleSkill(Skill):
@@ -23,8 +25,13 @@ class RuleSkill(Skill):
     # -- helpers -------------------------------------------------------- #
     @staticmethod
     def _grid_channel(state: WorldState, channel: int) -> np.ndarray:
-        """Exact grid-resolution view of a spatial memory channel."""
-        return grid_channel(state, channel)
+        """Grid-resolution structured map (wall/threat/novelty/...).
+
+        Phase 1 states carry learned spatial features; the structured maps
+        come from the encoder's metadata side-channel (fallback: the
+        spatial memory channels of Phase 0 states).
+        """
+        return structured_grid(state, _CHANNEL_NAMES.get(channel, "wall"))
 
     @staticmethod
     def _player(state: WorldState) -> Optional[EntityState]:
@@ -100,10 +107,25 @@ class RuleSkill(Skill):
 
 
 class ExploreSkill(RuleSkill):
-    """Move toward the nearest unvisited cell (novelty channel)."""
+    """Move toward the nearest unvisited cell (novelty channel).
 
-    def __init__(self, controller: ActionController, horizon: int = 8, name: str = "explore") -> None:
+    Phase 1: when an IntrinsicReward + VisitCounter are provided, the target
+    cell is chosen by intrinsic utility (novelty * decay^visits - risk)
+    instead of raw novelty, so curiosity is modulated by visit counts and
+    risk penalties.
+    """
+
+    def __init__(
+        self,
+        controller: ActionController,
+        horizon: int = 8,
+        name: str = "explore",
+        intrinsic: Optional[Any] = None,
+        visit_counter: Optional[Any] = None,
+    ) -> None:
         super().__init__(name=name, controller=controller, horizon=horizon)
+        self.intrinsic = intrinsic
+        self.visit_counter = visit_counter
 
     def can_start(self, state: WorldState) -> bool:
         return True
@@ -115,7 +137,13 @@ class ExploreSkill(RuleSkill):
         novelty = self._grid_channel(state, 3)
         wall = self._grid_channel(state, 1)
         threat = self._grid_channel(state, 2)
-        target = self._nearest_novel_cell(state, player, novelty, wall, threat)
+        if self.intrinsic is not None:
+            util = self.intrinsic.explore_utility_map(state, self.visit_counter)
+            target = self._nearest_high_utility_cell(state, player, util, novelty, wall, threat)
+            if target is None:
+                target = self._nearest_novel_cell(state, player, novelty, wall, threat)
+        else:
+            target = self._nearest_novel_cell(state, player, novelty, wall, threat)
         if target is None:
             self._done = True
             return self._step_and_act(self.controller.from_index(0))
@@ -145,6 +173,37 @@ class ExploreSkill(RuleSkill):
         while q:
             x, y = q.popleft()
             if novelty[y, x] > 0.5 and wall[y, x] <= 0.5 and threat[y, x] <= 0.5:
+                return np.array([x, y], dtype=np.float32)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < W and 0 <= ny < H and (nx, ny) not in seen and threat[ny, nx] <= 0.5:
+                    seen.add((nx, ny))
+                    q.append((nx, ny))
+        return None
+
+    @staticmethod
+    def _nearest_high_utility_cell(
+        state: WorldState,
+        player: EntityState,
+        util: np.ndarray,
+        novelty: np.ndarray,
+        wall: np.ndarray,
+        threat: np.ndarray,
+    ) -> Optional[np.ndarray]:
+        """Nearest reachable cell whose intrinsic utility is near the max."""
+        finite = util[np.isfinite(util)]
+        if finite.size == 0:
+            return None
+        threshold = 0.5 * float(finite.max())
+        H, W = util.shape
+        start = (int(round(float(player.position[0]))), int(round(float(player.position[1]))))
+        if not (0 <= start[0] < W and 0 <= start[1] < H):
+            return None
+        q: deque = deque([start])
+        seen = {start}
+        while q:
+            x, y = q.popleft()
+            if novelty[y, x] > 0.5 and wall[y, x] <= 0.5 and threat[y, x] <= 0.5 and util[y, x] >= threshold:
                 return np.array([x, y], dtype=np.float32)
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = x + dx, y + dy

@@ -46,11 +46,11 @@ class IntrinsicMotivation:
     def _local_threat(state: WorldState) -> float:
         """Threat level at the player's own grid cell (not the global max)."""
         try:
-            from open_player.core.state import grid_channel
+            from open_player.core.state import structured_grid
             player = next((e for e in state.entity_states(0) if e.semantic_type == "player"), None)
             if player is None:
                 return 0.0
-            threat = grid_channel(state, 2)
+            threat = structured_grid(state, "threat")
             gx = int(round(float(player.position[0])))
             gy = int(round(float(player.position[1])))
             if 0 <= gx < threat.shape[1] and 0 <= gy < threat.shape[0]:
