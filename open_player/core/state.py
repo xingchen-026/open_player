@@ -346,6 +346,16 @@ def structured_grid(state: WorldState, name: str, batch: int = 0) -> np.ndarray:
     channels in metadata['struct_grid']; rule skills and intrinsic reward
     consume those.  Phase 0 states fall back to the spatial memory channels.
     """
+    # Phase 1.5 strict / learned_grid: heuristics may only read LEARNED
+    # estimates (occupancy head, visit-derived novelty); GT is unavailable
+    mode = state.metadata.get("mode")
+    if mode in ("learned_grid", "strict"):
+        gs = int(state.metadata.get("grid_size", state.schema.world_size if state.schema else 12))
+        lg = state.metadata.get("learned_grid") or {}
+        if name in ("novelty", "wall", "threat", "visited", "occupancy", "resource"):
+            if name in lg:
+                return np.asarray(lg[name], dtype=np.float32)
+            return np.zeros((gs, gs), dtype=np.float32)
     sg = state.metadata.get("struct_grid")
     if sg and name in sg:
         return np.asarray(sg[name], dtype=np.float32)

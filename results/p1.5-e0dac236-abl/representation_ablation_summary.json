@@ -1,0 +1,12 @@
+{
+  "n": 3.0,
+  "seed_mean": 1.0,
+  "seed_std": 1.0,
+  "seed_median": 1.0,
+  "pooled_probe_acc_mean": 0.9016927480697632,
+  "pooled_probe_acc_std": 0.00478593685850862,
+  "pooled_probe_acc_median": 0.9031250476837158,
+  "per_entity_probe_acc_mean": 0.9995225866635641,
+  "per_entity_probe_acc_std": 0.0008269041549180458,
+  "per_entity_probe_acc_median": 1.0
+}

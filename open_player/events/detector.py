@@ -174,3 +174,49 @@ class HybridEventDetector(ChangeDetector):
 
     def boundary_score(self, event: Event) -> float:
         return float(event.metadata.get("boundary_prob", 0.0))
+
+
+class LearnedEventEmitter(ChangeDetector):
+    """Strict-RGB event source: learned change signal only.
+
+    No heuristic evidence, no GT positions, no env info.  Emits a single
+    state-change event per step when the learned change probability exceeds
+    the threshold (the Phase 1.5 strict mode's event stream).
+    """
+
+    def __init__(self, world_model: Optional[Any] = None, threshold: float = 0.5, device: Any = "cpu") -> None:
+        self.world_model = world_model
+        self.threshold = float(threshold)
+        self.device = device
+        self._counter = 0
+
+    @property
+    def available(self) -> bool:
+        return self.world_model is not None and getattr(self.world_model, "change_predictor", None) is not None
+
+    def detect(self, prev: Optional[WorldState], curr: WorldState, env_info: Dict[str, Any], t: int) -> List[Event]:
+        if prev is None or not self.available:
+            return []
+        try:
+            import torch
+            action = int(env_info.get("action", 0))
+            with torch.no_grad():
+                z_t = self.world_model.representation(prev).z
+                z_t1 = self.world_model.representation(curr).z
+                a = torch.full((z_t.shape[0],), action, dtype=torch.long, device=self.device)
+                logits, boundary = self.world_model.change_predictor(z_t, a, z_t1)
+                prob = float(torch.sigmoid(logits[:, 1]).mean())
+                bprob = float(boundary.mean())
+        except Exception:  # pragma: no cover - defensive
+            return []
+        if prob < self.threshold:
+            return []
+        self._counter += 1
+        return [Event(
+            event_id=f"learned-e{t}-{self._counter}",
+            type=EventType.STATE_CHANGE.value,
+            timestamp=int(t),
+            entities=["world"],
+            confidence=prob,
+            metadata={"learned_change_prob": prob, "boundary_prob": bprob, "source": "learned"},
+        )]

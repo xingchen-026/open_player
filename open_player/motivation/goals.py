@@ -71,6 +71,22 @@ class GoalManager:
         player = next((e for e in entities if e.semantic_type == "player"), None)
         candidates: List[Goal] = []
         t = int(state.t)
+        strict = bool(env_info.get("strict_rgb", False))
+
+        # strict mode: only goals derivable from learned observations
+        # (exploration / information / learning); task & survival need
+        # ground-truth entities / threat, which strict forbids
+        if strict:
+            candidates.append(
+                Goal(goal_id=self._id("exploration"), goal_type=GoalType.EXPLORATION.value, target="unknown",
+                     priority=min(1.0, motivation.get("novelty", 0.5) + 0.3), source="intrinsic:novelty", created_t=t)
+            )
+            if motivation.get("curiosity", 0.0) >= self.learning_threshold:
+                candidates.append(
+                    Goal(goal_id=self._id("learning"), goal_type=GoalType.LEARNING.value, target="world_model",
+                         priority=min(1.0, motivation["curiosity"] + 0.3), source="intrinsic:curiosity", created_t=t)
+                )
+            return candidates
 
         # task: collect a visible resource
         resources = [e for e in entities if e.semantic_type == "resource"]
@@ -151,18 +167,28 @@ class GoalManager:
             if env_info.get("collected_this_step"):
                 goal.status = "succeeded"
         elif gtype == GoalType.EXPLORATION.value:
-            sp = state.spatial_t[0].detach().cpu().numpy()
-            visited = float(sp[7].mean()) if sp.shape[0] > 7 else 0.0
-            goal.progress = visited
-            if visited >= self.goal_min_exploration:
+            # novelty from structured grids (GT in side mode, visit-derived
+            # in learned_grid / strict modes)
+            from open_player.core.state import structured_grid
+            novelty = float(structured_grid(state, "novelty").mean())
+            goal.progress = 1.0 - novelty
+            if goal.progress >= self.goal_min_exploration:
                 goal.status = "succeeded"
         elif gtype == GoalType.SURVIVAL.value:
-            goal.progress = float(env_info.get("hp", 1)) / max(1.0, float(env_info.get("hp_max", 3)))
-            goal.metadata["safe_steps"] = goal.metadata.get("safe_steps", 0) + (0 if env_info.get("hp_delta", 0) < 0 else 1)
-            if goal.metadata["safe_steps"] >= 8:
-                goal.status = "succeeded"
-            if env_info.get("hp", 1) <= 0:
-                goal.status = "failed"
+            hp = env_info.get("hp")
+            if hp is None:
+                # strict mode: no GT hp; the survival goal is not evaluated
+                goal.progress = 0.5
+                goal.metadata["safe_steps"] = goal.metadata.get("safe_steps", 0) + 1
+                if goal.metadata["safe_steps"] >= 8:
+                    goal.status = "succeeded"
+            else:
+                goal.progress = float(hp) / max(1.0, float(env_info.get("hp_max", 3)))
+                goal.metadata["safe_steps"] = goal.metadata.get("safe_steps", 0) + (0 if env_info.get("hp_delta", 0) < 0 else 1)
+                if goal.metadata["safe_steps"] >= 8:
+                    goal.status = "succeeded"
+                if float(hp) <= 0:
+                    goal.status = "failed"
         elif gtype == GoalType.LEARNING.value:
             err = float(env_info.get("world_model_error", 1.0))
             goal.progress = max(0.0, 1.0 - err)

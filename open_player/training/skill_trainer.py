@@ -64,6 +64,7 @@ class SkillTrainer:
         self.min_coverage = float(sc.get("success_min_coverage", 0.15))
         self.need_goal = bool(sc.get("success_goal_succeeded", True))
         self.skill_name = str(sc.get("skill_name", "neural_explore"))
+        self.last_acc: float = 0.0
 
     # ------------------------------------------------------------------ #
     def collect(
@@ -129,6 +130,7 @@ class SkillTrainer:
         """Supervised (BC) training: CE on actions + BCE on termination."""
         if len(xs) < self.batch_size:
             raise RuntimeError(f"not enough BC data ({len(xs)} pairs < batch {self.batch_size})")
+        skill = skill.to(self.device)
         X = torch.from_numpy(np.stack(xs)).to(self.device)
         A = torch.tensor(actions, dtype=torch.long, device=self.device)
         T = torch.tensor(terms, dtype=torch.float32, device=self.device).unsqueeze(1)
@@ -152,6 +154,7 @@ class SkillTrainer:
             logits, term_logit = skill(X)
             acc = float((logits.argmax(-1) == A).float().mean())
             tacc = float(((torch.sigmoid(term_logit) > 0.5).float() == T).float().mean())
+        self.last_acc = float(acc)
         return SkillTrainReport(
             skill_name=skill.name,
             data_steps=len(xs),

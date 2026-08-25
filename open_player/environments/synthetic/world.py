@@ -51,6 +51,7 @@ class GridWorld:
         enemy_attack_prob: float = 0.5,
         wall_density: Optional[float] = None,
         resource_cluster: bool = False,
+        resource_edge: bool = False,
         seed: int = 0,
     ) -> None:
         self.grid_size = int(grid_size)
@@ -62,6 +63,7 @@ class GridWorld:
         self.enemy_attack_prob = float(enemy_attack_prob)
         self.wall_density = None if wall_density is None else float(wall_density)
         self.resource_cluster = bool(resource_cluster)
+        self.resource_edge = bool(resource_edge)
         self.rng = np.random.default_rng(seed)
         self.reset()
 
@@ -150,6 +152,31 @@ class GridWorld:
                     pos = free_cell()
                     while np.abs(pos - self.player_pos).sum() < 2:
                         pos = free_cell()
+                self.resources.append(_Resource(entity_id=f"resource-{i}", position=pos))
+        elif self.resource_edge:
+            # resources scattered along the outer ring (World C topology)
+            ring_cells = [
+                np.array([x, y], dtype=np.float32)
+                for x in range(1, g - 1)
+                for y in range(1, g - 1)
+                if (x <= 2 or x >= g - 3 or y <= 2 or y >= g - 3)
+            ]
+            self.rng.shuffle(ring_cells)
+            ci = 0
+            for i in range(self.num_resources):
+                pos = None
+                while ci < len(ring_cells):
+                    cand = ring_cells[ci]
+                    ci += 1
+                    cell = (int(cand[0]), int(cand[1]))
+                    if cell in self.walls:
+                        continue
+                    if np.abs(cand - self.player_pos).sum() < 2:
+                        continue
+                    pos = cand
+                    break
+                if pos is None:
+                    pos = free_cell()
                 self.resources.append(_Resource(entity_id=f"resource-{i}", position=pos))
         else:
             for i in range(self.num_resources):

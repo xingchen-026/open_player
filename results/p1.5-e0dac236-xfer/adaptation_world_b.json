@@ -1,0 +1,130 @@
+[
+  {
+    "agent": "phase1",
+    "seed": 1,
+    "adapt": 0,
+    "collected": 2.3333333333333335,
+    "coverage": 0.39181286549707606,
+    "goal_success_rate": 1.0
+  },
+  {
+    "agent": "phase1",
+    "seed": 1,
+    "adapt": 100,
+    "collected": 2.3333333333333335,
+    "coverage": 0.39181286549707606,
+    "goal_success_rate": 1.0
+  },
+  {
+    "agent": "phase1",
+    "seed": 1,
+    "adapt": 500,
+    "collected": 2.3333333333333335,
+    "coverage": 0.39181286549707606,
+    "goal_success_rate": 1.0
+  },
+  {
+    "agent": "phase1",
+    "seed": 1,
+    "adapt": 1000,
+    "collected": 2.3333333333333335,
+    "coverage": 0.39181286549707606,
+    "goal_success_rate": 1.0
+  },
+  {
+    "agent": "phase0",
+    "seed": 0,
+    "adapt": 0,
+    "collected": 0.3333333333333333,
+    "coverage": 0.14327485380116958,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 0,
+    "adapt": 100,
+    "collected": 0.3333333333333333,
+    "coverage": 0.14327485380116958,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 0,
+    "adapt": 500,
+    "collected": 0.3333333333333333,
+    "coverage": 0.14327485380116958,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 0,
+    "adapt": 1000,
+    "collected": 0.3333333333333333,
+    "coverage": 0.14327485380116958,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 1,
+    "adapt": 0,
+    "collected": 1.0,
+    "coverage": 0.19005847953216373,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 1,
+    "adapt": 100,
+    "collected": 1.0,
+    "coverage": 0.19005847953216373,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 1,
+    "adapt": 500,
+    "collected": 1.0,
+    "coverage": 0.19005847953216373,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 1,
+    "adapt": 1000,
+    "collected": 1.0,
+    "coverage": 0.19005847953216373,
+    "goal_success_rate": 0.3333333333333333
+  },
+  {
+    "agent": "phase0",
+    "seed": 2,
+    "adapt": 0,
+    "collected": 0.6666666666666666,
+    "coverage": 0.2134502923976608,
+    "goal_success_rate": 0.6666666666666666
+  },
+  {
+    "agent": "phase0",
+    "seed": 2,
+    "adapt": 100,
+    "collected": 0.6666666666666666,
+    "coverage": 0.2134502923976608,
+    "goal_success_rate": 0.6666666666666666
+  },
+  {
+    "agent": "phase0",
+    "seed": 2,
+    "adapt": 500,
+    "collected": 0.6666666666666666,
+    "coverage": 0.2134502923976608,
+    "goal_success_rate": 0.6666666666666666
+  },
+  {
+    "agent": "phase0",
+    "seed": 2,
+    "adapt": 1000,
+    "collected": 0.6666666666666666,
+    "coverage": 0.2134502923976608,
+    "goal_success_rate": 0.6666666666666666
+  }
+]

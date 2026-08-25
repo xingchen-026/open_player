@@ -70,7 +70,12 @@ class StateFeaturizer:
         threat_t = torch.from_numpy(threat.reshape(-1).astype(np.float32)).to(self.device)
         onehot_t = torch.from_numpy(onehot.reshape(-1)).to(self.device)
         maps = torch.cat([novel_t, wall_t, threat_t, onehot_t]).unsqueeze(0)
-        return torch.cat([pooled, state.global_t, sp_mean, sp_max, state.uncertainty_t, maps], dim=-1).to(self.device).detach()
+        pooled = pooled.to(self.device)
+        global_t = state.global_t.to(self.device)
+        sp_mean = sp_mean.to(self.device)
+        sp_max = sp_max.to(self.device)
+        unc = state.uncertainty_t.to(self.device)
+        return torch.cat([pooled, global_t, sp_mean, sp_max, unc, maps], dim=-1).to(self.device).detach()
 
     @staticmethod
     def _pad_map(arr: np.ndarray, size: int) -> np.ndarray:

@@ -1,0 +1,337 @@
+{
+  "exp_id": "p1.5-e0dac236-xfer",
+  "git_hash": "33401ade07d0c4a61c63bfe776bad3abb56dbf5b",
+  "config": {
+    "meta": {
+      "name": "open-player-phase1.5",
+      "version": 1,
+      "description": "Phase 1.5 Scientific Validation: unified protocol, 5+ seeds, learning curves, world-model/skill/intrinsic/multi-step/representation ablations, STRICT_RGB_MODE, World B/C transfer and adaptation curves."
+    },
+    "seed": 1,
+    "device": "auto",
+    "logging": {
+      "level": "INFO"
+    },
+    "schema": {
+      "max_entities": 32,
+      "world_size": 12,
+      "max_speed": 1.0,
+      "max_size": 3.0,
+      "entity_fields": [
+        {
+          "name": "position",
+          "dim": 2
+        },
+        {
+          "name": "velocity",
+          "dim": 2
+        },
+        {
+          "name": "size",
+          "dim": 1
+        },
+        {
+          "name": "appearance",
+          "dim": 8
+        },
+        {
+          "name": "semantic_features",
+          "dim": 16
+        },
+        {
+          "name": "dynamics_features",
+          "dim": 12
+        },
+        {
+          "name": "status",
+          "dim": 1
+        }
+      ],
+      "belief_dim": 8,
+      "relation_fields": [
+        {
+          "name": "distance",
+          "dim": 1
+        },
+        {
+          "name": "direction",
+          "dim": 2
+        },
+        {
+          "name": "relative_velocity",
+          "dim": 2
+        },
+        {
+          "name": "overlap",
+          "dim": 1
+        },
+        {
+          "name": "visibility",
+          "dim": 1
+        },
+        {
+          "name": "semantic_relation",
+          "dim": 1
+        }
+      ],
+      "spatial": {
+        "channels": 16,
+        "height": 32,
+        "width": 32
+      },
+      "dynamics_dim": 64,
+      "temporal_dim": 16,
+      "global_dim": 32,
+      "uncertainty_dim": 8
+    },
+    "environment": {
+      "grid_size": 12,
+      "num_enemies": 2,
+      "num_resources": 4,
+      "fog_radius": 5,
+      "max_steps": 120,
+      "player_hp": 4,
+      "enemy_move_prob": 0.6,
+      "enemy_attack_prob": 0.4,
+      "wall_density": 0.05,
+      "resource_cluster": true,
+      "render_rgb": true,
+      "reward": {
+        "collect": 1.0,
+        "explore": 0.02,
+        "step": -0.01,
+        "death": -1.0
+      }
+    },
+    "vision": {
+      "enabled": true,
+      "input_height": 90,
+      "input_width": 160,
+      "channels": [
+        32,
+        64,
+        128,
+        256
+      ],
+      "spatial_channels": 16,
+      "patch_hidden": 256,
+      "patch_out": 24,
+      "detach_targets": true,
+      "spatial_reg": 0.05,
+      "mode": "side",
+      "occupancy_head": true,
+      "occupancy_loss_weight": 0.5
+    },
+    "world_model": {
+      "entity_hidden": 128,
+      "spatial_channels": [
+        32,
+        64
+      ],
+      "spatial_embed": 256,
+      "relation_hidden": 32,
+      "latent_dim": 64,
+      "dynamics_hidden": 128,
+      "head_hidden": 256,
+      "action_embedding_dim": 32,
+      "loss_weights": {
+        "entity": 1.0,
+        "spatial": 0.1,
+        "change": 0.5,
+        "latent": 0.1
+      }
+    },
+    "multi_step": {
+      "horizons": [
+        4,
+        8
+      ],
+      "loss_weights": {
+        "step1": 1.0,
+        "step4": 0.5,
+        "step8": 0.25
+      },
+      "window": 8
+    },
+    "rollout_schedule": {
+      "initial_teacher_forcing": 0.9,
+      "final_teacher_forcing": 0.2,
+      "anneal_steps": 5000,
+      "rollout_ratio": 0.2
+    },
+    "event_pred": {
+      "enabled": true,
+      "hidden": 64,
+      "conf_blend": 0.5,
+      "loss_weight": 1.0
+    },
+    "intrinsic": {
+      "alpha": 1.0,
+      "beta": 0.3,
+      "gamma": 0.2,
+      "risk_penalty": 0.5,
+      "repetition_penalty": 0.2,
+      "novelty_decay": 0.99,
+      "visit_count_cap": 10,
+      "info_goal_bonus": 0.3
+    },
+    "skill_training": {
+      "bc_epochs": 15,
+      "bc_batch_size": 64,
+      "lr": 0.001,
+      "min_trajectory_steps": 8,
+      "success_min_coverage": 0.15,
+      "success_goal_succeeded": true,
+      "train_steps": 400,
+      "skill_name": "neural_explore"
+    },
+    "training": {
+      "batch_size": 32,
+      "learning_rate": 0.001,
+      "replay_capacity": 2048,
+      "update_every": 1,
+      "replay_update_every": 8,
+      "replay_updates_per_tick": 1,
+      "exploration_eps": 0.15,
+      "epsilon_decay": 0.999,
+      "grad_clip": 1.0,
+      "steps": 2000,
+      "log_every": 100,
+      "goal_min_exploration": 0.6
+    },
+    "planning": {
+      "horizons": {
+        "short": 4,
+        "medium": 8,
+        "long": 32
+      },
+      "rollout_steps": 4,
+      "max_candidates": 4,
+      "goal_type_horizons": {
+        "task": "short",
+        "survival": "short",
+        "skill_improvement": "short",
+        "exploration": "medium",
+        "information": "long",
+        "learning": "long"
+      }
+    },
+    "goals": {
+      "novelty_threshold": 0.2,
+      "threat_threshold": 0.5,
+      "learning_threshold": 0.05,
+      "type_weights": {
+        "task": 1.0,
+        "survival": 0.9,
+        "exploration": 0.5,
+        "information": 0.3,
+        "learning": 0.3,
+        "skill_improvement": 0.2
+      }
+    },
+    "memory": {
+      "working_capacity": 64,
+      "episodic_capacity": 100
+    },
+    "checkpoint": {
+      "dir": "checkpoints",
+      "keep_last": 2
+    },
+    "transfer": {
+      "world_a": {
+        "name": "world_a_open",
+        "grid_size": 12,
+        "num_enemies": 1,
+        "num_resources": 4,
+        "fog_radius": 6,
+        "max_steps": 120,
+        "player_hp": 6,
+        "enemy_move_prob": 0.3,
+        "enemy_attack_prob": 0.3,
+        "wall_density": 0.03,
+        "resource_cluster": true,
+        "render_rgb": true
+      },
+      "world_b": {
+        "name": "world_b_narrow",
+        "grid_size": 14,
+        "num_enemies": 2,
+        "num_resources": 6,
+        "fog_radius": 4,
+        "max_steps": 150,
+        "player_hp": 6,
+        "enemy_move_prob": 0.7,
+        "enemy_attack_prob": 0.6,
+        "wall_density": 0.16,
+        "resource_cluster": false,
+        "render_rgb": true
+      }
+    },
+    "validation": {
+      "seeds": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "seeds_full": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "episodes": 5,
+      "max_steps": 100,
+      "curve_steps": [
+        1000,
+        2000,
+        5000,
+        10000,
+        20000
+      ],
+      "eval_interval": 500,
+      "adaptation_steps": [
+        0,
+        100,
+        500,
+        1000
+      ],
+      "world_c": {
+        "name": "world_c_maze",
+        "grid_size": 16,
+        "num_enemies": 2,
+        "num_resources": 6,
+        "fog_radius": 5,
+        "max_steps": 200,
+        "player_hp": 8,
+        "enemy_move_prob": 0.5,
+        "enemy_attack_prob": 0.5,
+        "wall_density": 0.22,
+        "resource_cluster": false,
+        "resource_edge": true,
+        "render_rgb": true
+      },
+      "generalization": {
+        "enemy_speeds": {
+          "interp_low": 0.15,
+          "interp_high": 0.75,
+          "extrap_low": 0.05,
+          "extrap_high": 0.95
+        },
+        "resource_densities": {
+          "low": 2,
+          "high": 10
+        }
+      }
+    }
+  },
+  "created_at": "2026-08-24T22:56:30.112830",
+  "note": "phase1_5:transfer"
+}

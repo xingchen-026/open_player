@@ -1,0 +1,98 @@
+[
+  {
+    "seed": 1,
+    "group": "speed_interp_low",
+    "agent": "phase0",
+    "collected": 4.0,
+    "coverage": 0.3993055555555556,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_interp_low",
+    "agent": "phase1",
+    "collected": 4.0,
+    "coverage": 0.71875,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_interp_high",
+    "agent": "phase0",
+    "collected": 1.6666666666666667,
+    "coverage": 0.34722222222222227,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_interp_high",
+    "agent": "phase1",
+    "collected": 2.0,
+    "coverage": 0.6840277777777777,
+    "goal_success_rate": 0.6666666666666666
+  },
+  {
+    "seed": 1,
+    "group": "speed_extrap_low",
+    "agent": "phase0",
+    "collected": 3.6666666666666665,
+    "coverage": 0.44097222222222215,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_extrap_low",
+    "agent": "phase1",
+    "collected": 4.0,
+    "coverage": 0.7395833333333334,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_extrap_high",
+    "agent": "phase0",
+    "collected": 1.3333333333333333,
+    "coverage": 0.34027777777777785,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "speed_extrap_high",
+    "agent": "phase1",
+    "collected": 2.3333333333333335,
+    "coverage": 0.37847222222222227,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "density_low",
+    "agent": "phase0",
+    "collected": 2.0,
+    "coverage": 0.5902777777777778,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "density_low",
+    "agent": "phase1",
+    "collected": 2.0,
+    "coverage": 0.5763888888888888,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "density_high",
+    "agent": "phase0",
+    "collected": 3.3333333333333335,
+    "coverage": 0.2916666666666667,
+    "goal_success_rate": 1.0
+  },
+  {
+    "seed": 1,
+    "group": "density_high",
+    "agent": "phase1",
+    "collected": 9.333333333333334,
+    "coverage": 0.4756944444444444,
+    "goal_success_rate": 1.0
+  }
+]

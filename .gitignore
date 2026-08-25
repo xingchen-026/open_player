@@ -9,6 +9,9 @@ dist/
 .mypy_cache/
 checkpoints/
 runs/
+results/*/checkpoints/
 *.pt
 *.pth
 .DS_Store
+results/p1.5-33401ade-*/
+results/_wm_smoke/

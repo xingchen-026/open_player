@@ -86,7 +86,8 @@ vision:
   patch_hidden: 256
   patch_out: 24                  # appearance(8) + semantic_features(16)
   detach_targets: true           # predictive-representation stability
-  spatial_reg: 0.05              # anti-collapse regularizer on spatial features
+  spatial_reg: 0.0               # anti-collapse regularizer (0 = off, instance norm suffices)
+  lr_scale: 0.2                  # vision learning-rate scale vs the world model
 
 # -----------------------------------------------------------------------------
 # World model (Phase 0 keys + Phase 1 multi-step)

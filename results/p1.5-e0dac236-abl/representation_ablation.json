@@ -1,0 +1,17 @@
+[
+  {
+    "seed": 0,
+    "pooled_probe_acc": 0.8963541984558105,
+    "per_entity_probe_acc": 1.0
+  },
+  {
+    "seed": 1,
+    "pooled_probe_acc": 0.9031250476837158,
+    "per_entity_probe_acc": 0.9985677599906921
+  },
+  {
+    "seed": 2,
+    "pooled_probe_acc": 0.9055989980697632,
+    "per_entity_probe_acc": 1.0
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "phase0": {
+    "params": 1836274,
+    "steps_per_sec": 23.289346828922163,
+    "gpu_mb_peak": 64.087552
+  },
+  "phase1": {
+    "params_world_model": 1850005,
+    "params_vision": 1144971,
+    "params_change": 13731,
+    "params_skill": 105863,
+    "params_total": 3114570,
+    "steps_per_sec": 12.339257081114056,
+    "gpu_mb_peak": 120.511488,
+    "checkpoint_bytes": 35297134
+  }
+}

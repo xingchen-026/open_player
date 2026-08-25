@@ -33,8 +33,11 @@ def test_gradient_flow_to_conv(cfg_p1, schema_p1, env_p1):
     obs = env_p1.reset(seed=5)
     ws = enc.encode(obs, t=0)
     (ws.entities_t.sum() + ws.spatial_t.sum()).backward()
-    grads = [p.grad for p in enc.parameters() if p.grad is not None]
-    assert len(grads) == len(list(enc.parameters()))
+    # the encode path trains conv / spatial projection / patch mlp; the
+    # occupancy + position heads receive their own auxiliary losses
+    for name, module in (("conv", enc.conv), ("spatial_proj", enc.spatial_proj), ("patch_mlp", enc.patch_mlp)):
+        grads = [p.grad for p in module.parameters() if p.grad is not None]
+        assert len(grads) == len(list(module.parameters())), f"{name} missing gradients"
 
 
 def test_determinism_same_encoder(cfg_p1, schema_p1, env_p1):

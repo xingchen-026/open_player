@@ -8,6 +8,10 @@
   而不是主要依赖启发式规则（learned vision / multi-step world model /
   learned change prediction / NeuralSkill / intrinsic exploration /
   transfer evaluation）。
+- Phase 1.5：Scientific Validation —— 统一评估协议、5+ seeds 学习曲线、
+  世界模型 / NeuralSkill / Intrinsic / Multi-step / Representation
+  ablations、STRICT_RGB_MODE 泄漏测试、World B/C transfer 与 adaptation。
+  完整实验报告见 docs/phase1_5_validation.md（含未通过的假设，如实报告）。
 
 架构决策已冻结，本项目不引入 Transformer / VLM / LLM / MCTS / 大型 RL /
 Vector DB，一切按结构化状态 + 小型神经模块 + 显式记忆 + 世界模型 +
@@ -251,7 +255,20 @@ Phase 1（Learning Validation）：
     python examples/phase1_transfer.py --steps 2000 --adaptation-steps 1000
     python examples/phase1_demo.py --checkpoint checkpoints/phase1.pt --render
 
-测试（Phase 0 + Phase 1 共 77 个用例）：
+Phase 1.5（Scientific Validation，结果写入 results/，报告见
+docs/phase1_5_validation.md）：
+
+    python examples/phase1_5_validation.py --experiment baselines
+    python examples/phase1_5_validation.py --experiment curve --max-step 10000
+    python examples/phase1_5_ablation.py --experiment skill
+    python examples/phase1_5_ablation.py --experiment worldmodel
+    python examples/phase1_5_ablation.py --experiment multistep
+    python examples/phase1_5_ablation.py --experiment intrinsic
+    python examples/phase1_5_ablation.py --experiment vision      # 含 STRICT_RGB_MODE
+    python examples/phase1_5_transfer.py --experiment transfer
+    python examples/phase1_5_plot.py
+
+测试（Phase 0 + Phase 1 + Phase 1.5 共 93 个用例）：
 
     python -m pytest
 

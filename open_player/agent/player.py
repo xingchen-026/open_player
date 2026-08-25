@@ -117,8 +117,10 @@ class Player:
         self.encoder = DummyVisionEncoder(self.schema, device=self.device)
         self.tracker = BeliefTracker(self.schema, device=self.device)
 
-        # Phase 1: learned vision (opt-in via config.vision.enabled)
-        self.vision_enabled = bool(config.get("vision.enabled", False))
+        # Phase 1 / 1.5: learned vision (opt-in via config.vision.enabled;
+        # mode 'structured' forces the Phase 0 path)
+        self.vision_mode = str(config.get("vision.mode", "side" if bool(config.get("vision.enabled", False)) else "structured"))
+        self.vision_enabled = bool(config.get("vision.enabled", False)) and self.vision_mode != "structured"
         self.vision: Optional[LearnedVisionEncoder] = None
         if self.vision_enabled:
             self.vision = LearnedVisionEncoder(self.schema, config, device=self.device).to(self.device)
@@ -131,13 +133,19 @@ class Player:
         self.controller = ActionController(DiscreteActionSpace(list(DEFAULT_ACTION_NAMES)))
         self.registry = SkillRegistry.build_default(self.controller, config, intrinsic=self.intrinsic, visit_counter=self.visit_counter)
 
-        # world model + trainer
+        # world model + trainer (vision params join the optimizer so the
+        # encoder is actually trained end-to-end)
         self.world_model = WorldModel(self.schema, config, num_actions=len(self.controller.space.names))
         self.world_model.to(self.device)
-        self.trainer = WorldModelTrainer(self.world_model, config, self.schema, device=self.device)
+        extra_params = list(self.vision.parameters()) if self.vision is not None else None
+        extra_lr_scale = float(config.get("vision.lr_scale", 0.2))
+        self.trainer = WorldModelTrainer(self.world_model, config, self.schema, device=self.device, extra_parameters=extra_params, extra_lr_scale=extra_lr_scale)
 
         # cognition
-        if bool(config.get("event_pred.enabled", False)):
+        if self.vision_mode == "strict":
+            from open_player.events.detector import LearnedEventEmitter
+            self.detector = LearnedEventEmitter(world_model=self.world_model, threshold=0.5, device=self.device)
+        elif bool(config.get("event_pred.enabled", False)):
             self.detector = HybridEventDetector(
                 HeuristicEventDetector(), world_model=self.world_model,
                 conf_blend=float(config.get("event_pred.conf_blend", 0.5)), device=self.device,
@@ -182,13 +190,29 @@ class Player:
         self.env = environment
         names = environment.action_space.names
         self.controller = ActionController(DiscreteActionSpace(list(names)))
-        self.registry = SkillRegistry.build_default(self.controller, self.config, intrinsic=self.intrinsic, visit_counter=self.visit_counter)
-        if self.neural_skill is not None:
-            self.registry.register(self.neural_skill)
+        if self.vision_mode == "strict":
+            # strict: only learned policies may act (NeuralSkill when
+            # trained, otherwise the ExploreSkill over learned grids)
+            from open_player.skills.rule import ExploreSkill
+            self.registry = SkillRegistry()
+            if self.neural_skill is not None:
+                self.registry.register(self.neural_skill)
+            else:
+                medium = int(self.config.get("planning.horizons.medium", 8))
+                self.registry.register(ExploreSkill(
+                    self.controller, horizon=medium, name="explore",
+                    intrinsic=self.intrinsic, visit_counter=self.visit_counter,
+                ))
+        else:
+            self.registry = SkillRegistry.build_default(self.controller, self.config, intrinsic=self.intrinsic, visit_counter=self.visit_counter)
+            if self.neural_skill is not None:
+                self.registry.register(self.neural_skill)
         if self.world_model.num_actions != len(names):
             self.world_model = WorldModel(self.schema, self.config, num_actions=len(names))
             self.world_model.to(self.device)
-            self.trainer = WorldModelTrainer(self.world_model, self.config, self.schema, device=self.device)
+            extra_params = list(self.vision.parameters()) if self.vision is not None else None
+            extra_lr_scale = float(self.config.get("vision.lr_scale", 0.2))
+            self.trainer = WorldModelTrainer(self.world_model, self.config, self.schema, device=self.device, extra_parameters=extra_params, extra_lr_scale=extra_lr_scale)
             if self.detector is not None and isinstance(self.detector, HybridEventDetector):
                 self.detector.world_model = self.world_model
         self.planner = Planner(self.config, self.registry, self.schema, model=self.world_model, procedural_memory=self.procedural)
@@ -217,11 +241,25 @@ class Player:
         """Observation -> WorldState.
 
         Phase 0: BeliefTracker (cross-step belief update).
-        Phase 1 (vision.enabled): LearnedVisionEncoder (RGB -> learned
-        spatial/entity features, fresh per step).
+        Phase 1 (vision, mode 'side'): LearnedVisionEncoder + GT side-channel.
+        Phase 1.5 (modes 'learned_grid' / 'strict'): learned occupancy +
+        visit-derived novelty; strict additionally hides GT positions.
         """
         if self.vision_enabled and self.vision is not None:
             self.state = self.vision.encode(observation, t=t)
+            if self.vision_mode in ("learned_grid", "strict") and self.visit_counter is not None:
+                # visit-derived novelty from the LEARNED self-localisation
+                player = next((e for e in self.state.entity_states(0) if e.semantic_type == "player"), None)
+                if player is not None:
+                    self.visit_counter.update(np.asarray(player.position, dtype=np.float32))
+                gs = int(self.state.metadata.get("grid_size", self.schema.world_size))
+                cap = float(self.config.get("intrinsic.visit_count_cap", 10))
+                nov = np.ones((gs, gs), dtype=np.float32)
+                for (x, y), v in self.visit_counter.counts.items():
+                    if 0 <= x < gs and 0 <= y < gs:
+                        nov[y, x] = max(0.0, 1.0 - min(float(v), cap) / cap)
+                lg = self.state.metadata.setdefault("learned_grid", {})
+                lg["novelty"] = nov
         else:
             self.state = self.tracker.track(self.state, observation, t=t)
         return self.state
@@ -258,6 +296,20 @@ class Player:
     def _drives(self, state: WorldState) -> Dict[str, float]:
         return self.motivation.compute(state, world_model_error=self._last_error, reward=self.working.last_reward)
 
+    def _sanitize_env_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """Strict mode: decision modules may not read environment GT.
+
+        Measurement (env outcomes recorded by the protocol) is separate from
+        decision-making and remains untouched; this filter only guards the
+        info dict handed to the goal system / planner.
+        """
+        if self.vision_mode != "strict":
+            return dict(info)
+        allowed = {"action", "env_t", "timeout", "world_model_error", "intrinsic_reward", "intrinsic_novelty", "uncertainty_mean"}
+        out = {k: v for k, v in info.items() if k in allowed}
+        out["strict_rgb"] = True
+        return out
+
     # ------------------------------------------------------------------ #
     # main loops
     # ------------------------------------------------------------------ #
@@ -268,6 +320,7 @@ class Player:
         log_every: Optional[int] = None,
         checkpoint: Optional[str] = None,
         verbose: bool = True,
+        step_callback: Optional[Any] = None,
     ) -> PlayerReport:
         """Run the full closed loop while training the world model online."""
         self.attach(environment)
@@ -302,7 +355,12 @@ class Player:
             self._record_events(events)
 
             # world model learning (1-step + multi-step + learned change)
-            metrics = self.trainer.online_step(state, action.index, state2, float(reward), bool(done), change)
+            extra_loss = None
+            if self.vision is not None and self.vision_mode in ("learned_grid", "strict"):
+                # auxiliary supervision (occupancy + localisation) - training
+                # world only; evaluation never calls this
+                extra_loss = self.vision.aux_losses(state2, obs2)
+            metrics = self.trainer.online_step(state, action.index, state2, float(reward), bool(done), change, extra_loss=extra_loss)
             if metrics:
                 self._last_error = float(metrics.get("entity", self._last_error or 0.0))
             tick = self.trainer.tick()
@@ -312,7 +370,7 @@ class Player:
                 state2 = state2.detach()
 
             # Phase 1: intrinsic reward + visit counts
-            env_info = dict(info)
+            env_info = self._sanitize_env_info(info)
             env_info["action"] = action.index
             env_info["world_model_error"] = self._last_error or 0.0
             env_info["num_resources"] = getattr(getattr(environment, "world", None), "num_resources", 1)
@@ -320,7 +378,7 @@ class Player:
             if self.intrinsic is not None:
                 player = next((e for e in state2.entity_states(0) if e.semantic_type == "player"), None)
                 player_pos = None if player is None else player.position
-                if self.visit_counter is not None and player_pos is not None:
+                if self.visit_counter is not None and player_pos is not None and self.vision_mode not in ("learned_grid", "strict"):
                     self.visit_counter.update(player_pos)
                 ir = self.intrinsic.compute(
                     state=state2,
@@ -346,6 +404,8 @@ class Player:
             self.working.add_action(action.index)
             self._track_goal(state2, env_info)
 
+            if step_callback is not None:
+                step_callback(step, state2, env_info, events, action, info)
             steps_in_env += 1
             if done:
                 report.episodes += 1
@@ -418,7 +478,7 @@ class Player:
             events = self.detector.detect(state, state2, info, step + 1)
             self._record_events(events)
             self.working.last_reward = float(reward)
-            env_info = dict(info)
+            env_info = self._sanitize_env_info(info)
             env_info["num_resources"] = getattr(getattr(environment, "world", None), "num_resources", 1)
             env_info["world_model_error"] = self._last_error or 0.0
             self._track_goal(state2, env_info)
@@ -563,7 +623,7 @@ class Player:
                 obs2, reward, done, info = environment.step(action)
                 total_reward += float(reward)
                 state = self.perceive(obs2, t + 1)
-                env_info = dict(info)
+                env_info = self._sanitize_env_info(info)
                 env_info["num_resources"] = getattr(getattr(environment, "world", None), "num_resources", 1)
                 if self.goal is not None:
                     status = self.goal_manager.update(self.goal, state, env_info)
@@ -676,6 +736,19 @@ class Player:
         from open_player.agent.player import Player as _Player
         p0 = _Player(_Cfg(base))
         return p0.evaluate(env, episodes=episodes, max_steps=max_steps, seed=int(self.config.seed))
+
+    def load_skill(self, path: str) -> None:
+        """Load a NeuralSkill trained elsewhere (e.g. side-mode BC -> strict)."""
+        from open_player.skills.neural import NeuralSkill
+        if self.neural_skill is None:
+            self.neural_skill = NeuralSkill(
+                name=str(self.config.get("skill_training.skill_name", "neural_explore")),
+                action_names=list(self.controller.space.names),
+                featurizer=self.featurizer,
+                horizon=int(self.config.get("planning.horizons.medium", 8)),
+            ).to(self.device)
+        trainer = SkillTrainer(self.config, self.featurizer, device=self.device)
+        trainer.load(self.neural_skill, path)
 
     def save_checkpoint(self, path: str) -> str:
         modules: Dict[str, Any] = {}

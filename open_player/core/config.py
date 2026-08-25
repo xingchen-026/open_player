@@ -151,6 +151,9 @@ class Config:
     def __getitem__(self, key: str) -> Any:
         return object.__getattribute__(self, "_data")[key]
 
+    def __setitem__(self, key: str, value: Any) -> None:
+        object.__getattribute__(self, "_data")[key] = value
+
     def __iter__(self) -> Iterator[str]:
         return iter(object.__getattribute__(self, "_data"))
 

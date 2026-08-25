@@ -34,13 +34,27 @@ log = logging.getLogger("open_player.training")
 class WorldModelTrainer:
     """Owns optimizer / replay / uncertainty / checkpointing for the WorldModel."""
 
-    def __init__(self, model: WorldModel, config: Config, schema: SchemaSet, device: Any = "cpu") -> None:
+    def __init__(
+        self,
+        model: WorldModel,
+        config: Config,
+        schema: SchemaSet,
+        device: Any = "cpu",
+        extra_parameters: Optional[Any] = None,
+        extra_lr_scale: float = 1.0,
+    ) -> None:
         self.model = model
         self.config = config
         self.schema = schema
         self.device = device
         tc = config.training
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=float(tc.learning_rate))
+        if extra_parameters is not None and len(list(extra_parameters)) > 0:
+            self.optimizer = torch.optim.Adam([
+                {"params": model.parameters(), "lr": float(tc.learning_rate)},
+                {"params": list(extra_parameters), "lr": float(tc.learning_rate) * float(extra_lr_scale)},
+            ])
+        else:
+            self.optimizer = torch.optim.Adam(model.parameters(), lr=float(tc.learning_rate))
         self.replay = ReplayBuffer(capacity=int(tc.replay_capacity), seed=int(config.seed))
         self.uncertainty = UncertaintyEstimator(dim=schema.entity.D_entity)
         self.checkpointer = Checkpointer(
@@ -94,8 +108,14 @@ class WorldModelTrainer:
         reward: float,
         done: bool,
         change: float,
+        extra_loss: Optional[torch.Tensor] = None,
     ) -> Dict[str, float]:
-        """Store the transition; optionally update on it (1-step + multi-step)."""
+        """Store the transition; optionally update on it (1-step + multi-step).
+
+        extra_loss (Phase 1.5): auxiliary losses computed outside the model
+        (e.g. the vision encoder's occupancy / localisation heads) that
+        share this update step.
+        """
         self.replay.store(state, action, next_state, reward, done, change)
         metrics: Dict[str, float] = {}
         if self.step % self.update_every == 0:
@@ -125,12 +145,14 @@ class WorldModelTrainer:
                 metrics["boundary"] = float(lb.detach().cpu())
 
             # anti-collapse regularizer on learned spatial features
+            # (default off: instance norm already keeps the maps non-degenerate)
             if self.detach_targets and state.spatial_t.requires_grad:
                 from open_player.training.losses import spatial_variance_loss
-                reg_w = float(self.config.get("vision.spatial_reg", 0.05))
-                reg = reg_w * spatial_variance_loss(state.spatial_t)
-                total = total + reg
-                metrics["spatial_reg"] = float(reg.detach().cpu())
+                reg_w = float(self.config.get("vision.spatial_reg", 0.0))
+                if reg_w > 0:
+                    reg = reg_w * spatial_variance_loss(state.spatial_t)
+                    total = total + reg
+                    metrics["spatial_reg"] = float(reg.detach().cpu())
 
             # multi-step loss from the sliding sequence window
             if self.ms_enabled:
@@ -153,6 +175,10 @@ class WorldModelTrainer:
                         if name != "total_ms":
                             metrics[f"ms_{name}"] = float(value.detach().cpu())
                     metrics["teacher_forcing"] = tf
+
+            if extra_loss is not None:
+                total = total + extra_loss
+                metrics["aux"] = float(extra_loss.detach().cpu())
 
             self.optimizer.zero_grad(set_to_none=True)
             total.backward()

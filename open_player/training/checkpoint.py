@@ -79,20 +79,27 @@ class Checkpointer:
         }
 
     def _prune(self, keep_path: str) -> None:
-        """Keep only the newest keep_last checkpoints (best-effort)."""
+        """Keep the newest keep_last checkpoints PER PREFIX (per seed/run).
+
+        Phase 1.5 stores many seed checkpoints in one directory; pruning
+        globally would delete other seeds' checkpoints.
+        """
         if self.keep_last <= 0:
             return
         d = os.path.dirname(os.path.abspath(keep_path))
         try:
-            files = sorted(
-                (os.path.join(d, f) for f in os.listdir(d) if f.endswith(".pt")),
-                key=os.path.getmtime,
-                reverse=True,
-            )
-            for old in files[self.keep_last :]:
-                try:
-                    os.remove(old)
-                except OSError:  # pragma: no cover
-                    pass
+            groups: dict = {}
+            for f in os.listdir(d):
+                if not f.endswith(".pt"):
+                    continue
+                prefix = f.rsplit("_step", 1)[0] if "_step" in f else f.rsplit(".pt", 1)[0]
+                groups.setdefault(prefix, []).append(os.path.join(d, f))
+            for prefix, files in groups.items():
+                files.sort(key=os.path.getmtime, reverse=True)
+                for old in files[self.keep_last :]:
+                    try:
+                        os.remove(old)
+                    except OSError:  # pragma: no cover
+                        pass
         except OSError:  # pragma: no cover
             pass

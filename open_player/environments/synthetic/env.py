@@ -30,6 +30,7 @@ class SyntheticGridEnv(Environment):
             enemy_attack_prob=float(ec.get("enemy_attack_prob", 0.5)),
             wall_density=ec.get("wall_density", None),
             resource_cluster=bool(ec.get("resource_cluster", False)),
+            resource_edge=bool(ec.get("resource_edge", False)),
             seed=int(config.seed),
         )
         self._reward_cfg = ec.reward
